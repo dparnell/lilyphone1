@@ -17,6 +17,8 @@ static uint8_t gps_month=0, gps_day=0;
 static uint8_t gps_hour=0, gps_minute=0, gps_second=0;
 static uint32_t gps_vsat=0;
 
+static bool updated_time_from_gps = false;
+
 uint8_t buffer[256];
 
 bool gps_init(void)
@@ -144,6 +146,8 @@ void displayInfo()
         Serial.print(gps_day);
         Serial.print(F("/"));
         Serial.print(gps_year);
+
+
     }
     else
     {
@@ -169,6 +173,30 @@ void displayInfo()
             Serial.print(F("0"));
         Serial.print(gps_second);
         Serial.print(F("."));
+
+        if(!updated_time_from_gps) {
+            struct tm t = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+            t.tm_year = gps_year - 1900;    // This is year-1900, so 121 = 2021
+            t.tm_mon = gps_month - 1;
+            t.tm_mday = gps_day;
+            t.tm_hour = gps_hour;
+            t.tm_min = gps_minute;
+            t.tm_sec = gps_second;
+            time_t timeSinceEpoch = mktime(&t);
+            struct timeval tv;
+            tv.tv_usec = 0;
+            if (timeSinceEpoch > 2082758399){
+                // overflowed!
+                tv.tv_sec = timeSinceEpoch - 2082758399;  // epoch time (seconds)
+            } else {
+            tv.tv_sec = timeSinceEpoch;  // epoch time (seconds)
+            }
+
+            Serial.print(F(" "));
+            Serial.print(tv.tv_sec);
+
+            settimeofday(&tv, NULL);
+        }
     }
     else
     {
