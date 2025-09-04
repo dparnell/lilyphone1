@@ -2,6 +2,7 @@
 #define __PERIPHERAL_H__
 
 #include <stdint.h>
+#include "lvgl.h"
 
 #define GPS_PRIORITY     (configMAX_PRIORITIES - 1)
 #define LORA_PRIORITY    (configMAX_PRIORITIES - 2)
@@ -43,13 +44,8 @@ void lora_sleep(void);
 #define KEYPAD_PRESS   1
 #define KEYPAD_RELEASE 0
 
-typedef void (*keypad_cb)(int state, char val);
-
 bool keypad_init(int address);
-int keypad_get_val(char *c);
-void keypad_loop(void);
-void keypad_regetser_cb(keypad_cb cb);
-void keypad_set_flag(void);
+void keypad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data);
 
 // gyro
 bool BHI260AP_init(void);

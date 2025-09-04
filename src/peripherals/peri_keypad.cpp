@@ -2,6 +2,7 @@
 #include <Adafruit_TCA8418.h>
 #include "utilities.h"
 #include "peripheral.h"
+#include "lvgl.h"
 
 #define KEYPAD_ROWS 4
 #define KEYPAD_COLS 10
@@ -12,16 +13,44 @@
 
 const char keymap[KEYPAD_ROWS][KEYPAD_COLS] = {
     {'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'},
-    {'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', '0'},
-    {'2', 'z', 'x', 'c', 'v', 'b', 'n', 'm', '$', 'E'},
-    {' ', ' ', ' ', ' ', ' ', '-', '*', 'S', '0', 'U'},
+    {'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', LV_KEY_BACKSPACE},
+    {  0, 'z', 'x', 'c', 'v', 'b', 'n', 'm', '$', LV_KEY_ENTER},
+    {  0,   0,   0,   0,   0,   0,   0, ' ',   0, 0},
 };
 
+const char shift_keymap[KEYPAD_ROWS][KEYPAD_COLS] = {
+    {'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'},
+    {'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', LV_KEY_BACKSPACE},
+    {  0, 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '$', LV_KEY_ENTER},
+    {  0,   0,   0,   0,   0,   0,   0, ' ',   0, 0},
+};
+
+const char sym_keymap[KEYPAD_ROWS][KEYPAD_COLS] = {
+    {'#', '1', '2', '3', '(', ')', '_', '-', '+', '@'},
+    {'*', '4', '5', '6', '/', ':', ';', '\'', '"', LV_KEY_BACKSPACE},
+    {  0, '7', '8', '9', '?', '!', ',', '.', '$', LV_KEY_ENTER},
+    {  0,   0,   0,   0,   0,   0,   0, ' ',   0, 0},
+};
+
+const char alt_keymap[KEYPAD_ROWS][KEYPAD_COLS] = {
+    {LV_KEY_ESC, 0, LV_KEY_END, 0, 0, 0, LV_KEY_UP, 0, 0, LV_KEY_PREV},
+    {LV_KEY_HOME, 0, LV_KEY_DOWN, 0, 0, 0, 0, 0, 0, LV_KEY_BACKSPACE},
+    {  0, 0, 0, 0, 0, 0, 0, 0, 0, LV_KEY_ENTER},
+    {  0,   0,   0,   0,   0,   0,   0, ' ',   0, 0},
+};
+
+
+bool shift = false;
+bool alt = false;
+bool sym = false;
+
+#define K_ALT 29
+#define K_LEFT_SHIFT 34
+#define K_SYM 31
+#define K_RIGHT_SHIFT 30
+
+
 Adafruit_TCA8418 keypad; 
-keypad_cb keypad_listener = NULL;
-char keypad_curr_val = ' ';
-int keypad_state = KEYPAD_RELEASE;
-bool keypad_update = false;
 
 bool keypad_init(int address)
 {
@@ -47,21 +76,8 @@ bool keypad_init(int address)
     return true;
 }
 
-int keypad_get_val(char *c)
-{
-    if(c){
-        *c = keypad_curr_val;
-    }
-    return keypad_update;
-} 
 
-void keypad_set_flag(void)
-{
-    keypad_update = false;
-}
-
-void keypad_loop(void)
-{
+void keypad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data) {
     char c = -1;
     int state = -1;
     int row, col;
@@ -70,29 +86,55 @@ void keypad_loop(void)
 
     if(k >=KEYPAD_RELEASE_VAL_MIN && k <= KEYPAD_RELEASE_VAL_MAX){ // release event
         k = k - KEYPAD_RELEASE_VAL_MIN;
-        state = KEYPAD_RELEASE;
+
+        if(k == K_LEFT_SHIFT || k == K_RIGHT_SHIFT) {
+            shift = false;
+        } else if(k == K_ALT) {
+            alt = false;
+        } else if(k == K_SYM) {
+            sym = false;
+        } else {
+            state = KEYPAD_RELEASE;        
+            data->state = LV_INDEV_STATE_PRESSED;
+        }
     }   
 
     if(k >=KEYPAD_PRESS_VAL_MIN && k <= KEYPAD_PRESS_VAL_MAX){ // press event
         k = k - KEYPAD_PRESS_VAL_MIN;
-        state = KEYPAD_PRESS;
+
+        if(k == K_LEFT_SHIFT || k == K_RIGHT_SHIFT) {
+            shift = true;
+        } else if(k == K_ALT) {
+            alt = true;
+        } else if(k == K_SYM) {
+            sym = true;
+        } else {
+            state = KEYPAD_PRESS;
+            data->state = LV_INDEV_STATE_RELEASED;
+        }
     }
 
     if(state != -1){
         row = k / KEYPAD_COLS;
         col = (KEYPAD_COLS-1) - k % KEYPAD_COLS;
-        c = keymap[row][col];
-        Serial.printf("k=%d, v=%d, press:%d, %d, %c\n", k, v, row, col, c);
-        // if(keypad_listener)
-        //     keypad_listener(state, c);
-        
-        keypad_curr_val = c;
-        keypad_state = state;
-        keypad_update = true;
-    }
-}
+        if(shift) {
+            c = shift_keymap[row][col];
+        } else if(sym) {
+            c = sym_keymap[row][col];
+        } else if(alt) {
+            c = alt_keymap[row][col];
+        } else {
+            c = keymap[row][col];
+        }
 
-void keypad_regetser_cb(keypad_cb cb)
-{
-    keypad_listener = cb;
+        if(c > 32) {
+            Serial.printf("k=%d, v=%d, press:%d, %d, '%c'\n", k, v, row, col, c);
+        } else {
+            Serial.printf("k=%d, v=%d, press:%d, %d, %d\n", k, v, row, col, c);
+        }
+
+        data->key = c;
+    }
+
+    data->continue_reading = v > 0;
 }

@@ -202,6 +202,16 @@ static void lvgl_init(void)
     indev_drv.type = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = touchpad_read;
     lv_indev_drv_register(&indev_drv);
+
+    /*------------------
+     * Keypad
+     * -----------------*/
+    /*Register a keypad input device*/
+    static lv_indev_drv_t kp_drv;
+    lv_indev_drv_init(&kp_drv);
+    kp_drv.type = LV_INDEV_TYPE_KEYPAD;
+    kp_drv.read_cb = keypad_read;
+    lv_indev_drv_register(&kp_drv);
 }
 
 static bool bq25896_init(void)
@@ -417,7 +427,6 @@ void setup() {
 
 void loop() {
     lv_task_handler();
-    keypad_loop();
     
     delay(1);
 }
