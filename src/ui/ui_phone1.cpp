@@ -611,7 +611,7 @@ static scr_lifecycle_t screen1_1 = {
 };
 #endif
 //************************************[ screen 2 ]****************************************** Setting
-// --------------------- screen 2.1 --------------------- About System
+// --------------------- screen 2.1 --------------------- Time
 #if 1
 static lv_obj_t *scr2_1_cont;
 
@@ -622,7 +622,45 @@ static void scr2_1_btn_event_cb(lv_event_t * e)
     }
 }
 
+#include "timezone_names.h"
+
 static void create2_1(lv_obj_t *parent) 
+{
+    lv_obj_t* timezone_dd = lv_dropdown_create(parent);
+    lv_dropdown_set_options_static(timezone_dd, timezone_names);
+
+    lv_obj_align(timezone_dd, LV_ALIGN_TOP_MID, 0, 35);
+
+    lv_obj_t *back2_1_label = scr_back_btn_create(parent, ("About System"), scr2_1_btn_event_cb);
+}
+static void entry2_1(void) 
+{
+    ui_disp_full_refr();
+}
+static void exit2_1(void) {
+    ui_disp_full_refr();
+}
+static void destroy2_1(void) { }
+
+static scr_lifecycle_t screen2_1 = {
+    .create = create2_1,
+    .entry = entry2_1,
+    .exit  = exit2_1,
+    .destroy = destroy2_1,
+};
+#endif
+// --------------------- screen 2.2 --------------------- About System
+#if 1
+static lv_obj_t *scr2_2_cont;
+
+static void scr2_2_btn_event_cb(lv_event_t * e)
+{
+    if(e->code == LV_EVENT_CLICKED){
+        scr_mgr_pop(false);
+    }
+}
+
+static void create2_2(lv_obj_t *parent) 
 {
     lv_obj_t *info = lv_label_create(parent);
     lv_obj_set_width(info, LV_HOR_RES * 0.9);
@@ -656,22 +694,22 @@ static void create2_1(lv_obj_t *parent)
     
     lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 35);
     
-    lv_obj_t *back2_1_label = scr_back_btn_create(parent, ("About System"), scr2_1_btn_event_cb);
+    lv_obj_t *back2_2_label = scr_back_btn_create(parent, ("About System"), scr2_2_btn_event_cb);
 }
-static void entry2_1(void) 
+static void entry2_2(void) 
 {
     ui_disp_full_refr();
 }
-static void exit2_1(void) {
+static void exit2_2(void) {
     ui_disp_full_refr();
 }
-static void destroy2_1(void) { }
+static void destroy2_2(void) { }
 
-static scr_lifecycle_t screen2_1 = {
-    .create = create2_1,
-    .entry = entry2_1,
-    .exit  = exit2_1,
-    .destroy = destroy2_1,
+static scr_lifecycle_t screen2_2 = {
+    .create = create2_2,
+    .entry = entry2_2,
+    .exit  = exit2_2,
+    .destroy = destroy2_2,
 };
 #endif
 // --------------------- screen 2 --------------------- Setting
@@ -682,13 +720,14 @@ static int setting_num = 0;
 static int setting_page_num = 0;
 static int setting_curr_page = 0;
 static ui_setting_handle setting_handle_list[] = {
+    {.name = "- Time",   .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_1_ID},
     {.name = "Keypad Backlight", .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_keypad_light, .get_cb = ui_setting_get_keypad_light},
     {.name = "Motor Status",     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
     {.name = "Power GPS",        .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},
     {.name = "Power Lora",       .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_lora_status,  .get_cb = ui_setting_get_lora_status},
     {.name = "Power Gyro",       .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gyro_status,  .get_cb = ui_setting_get_gyro_status},
     {.name = "Power A7682",      .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_a7682_status, .get_cb = ui_setting_get_a7682_status},
-    {.name = "- About System",   .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_1_ID},
+    {.name = "- About System",   .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_2_ID},
 };
 
 static void setting_item_create(int curr_apge);
@@ -2167,7 +2206,8 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN1_ID,    &screen1);      // Lora
     scr_mgr_register(SCREEN1_1_ID,  &screen1_1);    // - Auto send
     scr_mgr_register(SCREEN2_ID,    &screen2);      // Setting
-    scr_mgr_register(SCREEN2_1_ID,  &screen2_1);    //  - About System
+    scr_mgr_register(SCREEN2_1_ID,  &screen2_1);    //  - Time
+    scr_mgr_register(SCREEN2_2_ID,  &screen2_2);    //  - About System
     scr_mgr_register(SCREEN3_ID,    &screen3);      // 
     scr_mgr_register(SCREEN4_ID,    &screen4);      // WIFI
     scr_mgr_register(SCREEN4_1_ID,  &screen4_1);    //  - WIFI Config
