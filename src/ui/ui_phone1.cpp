@@ -114,9 +114,10 @@ static struct menu_btn menu_btn_list[] =
     {SCREEN4_ID,  &img_wifi,    "Wifi",     23,     101},
     {SCREEN5_ID,  &img_test,    "Test",     95,     101},
     {SCREEN6_ID,  &img_batt,    "Battery",  167,    101},
+    {SCREEN11_ID, &img_PCM5102, "Sleep",    23,     189},
     {SCREEN8_ID,  &img_A7682E,  "Phone" ,   95,     189},
     {SCREEN9_ID,  &img_lora,    "Shutdown", 167,    189},
-    {SCREEN11_ID, &img_PCM5102, "Sleep",    95,     13},  // Page two
+
 };
 
 static void menu_btn_event_cb(lv_event_t *e)
@@ -205,9 +206,10 @@ static void create0(lv_obj_t *parent)
     lv_obj_set_scrollbar_mode(menu_taskbar, LV_SCROLLBAR_MODE_OFF);
     lv_obj_clear_flag(menu_taskbar, LV_OBJ_FLAG_SCROLLABLE);
     
+
     menu_taskbar_time = lv_label_create(menu_taskbar);
     lv_obj_set_style_border_width(menu_taskbar_time, 0, 0);
-    lv_label_set_text_fmt(menu_taskbar_time, "%02d:%02d", 10, 19);
+    lv_label_set_text(menu_taskbar_time, "XX:XX");
     lv_obj_set_style_text_font(menu_taskbar_time, &Font_Mono_Bold_14, LV_PART_MAIN);
     lv_obj_align(menu_taskbar_time, LV_ALIGN_LEFT_MID, 10, 0);
 
@@ -2090,15 +2092,28 @@ static void menu_keypay_get_event(lv_timer_t *t)
 
 static void menu_taskbar_update_timer_cb(lv_timer_t *t)
 {
-    static int sec = 0;
-    sec++;
 
+    struct tm timeinfo;
+    time_t now;
+
+    static int tick = 0;
+    tick++;
+    static int last_hour = 0;
+    static int last_min = 0;
     bool charge = 0;
     bool finish = 0;
     bool wifi = 0;
     int percent = 0;
 
-    if(sec % 10 == 0)
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    if(last_hour != timeinfo.tm_hour || last_min != timeinfo.tm_min) {
+        lv_label_set_text_fmt(menu_taskbar_time, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+        last_hour = timeinfo.tm_hour;
+        last_min = timeinfo.tm_min;
+    }
+
+    if(tick % 10 == 0)
     {
         finish = ui_battery_27220_get_charge_finish();
         percent = ui_battery_27220_get_percent();
@@ -2120,6 +2135,7 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
             taskbar_statue[TASKBAR_ID_BATTERY_PERCENT] = percent;
         }
     }
+    
 
     charge = ui_battery_27220_get_input();
     if(taskbar_statue[TASKBAR_ID_CHARGE] != charge) 
