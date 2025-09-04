@@ -211,7 +211,12 @@ static void lvgl_init(void)
     lv_indev_drv_init(&kp_drv);
     kp_drv.type = LV_INDEV_TYPE_KEYPAD;
     kp_drv.read_cb = keypad_read;
-    lv_indev_drv_register(&kp_drv);
+    lv_indev_t *indev = lv_indev_drv_register(&kp_drv);
+
+    lv_group_t *g = lv_group_create();
+    lv_group_set_default(g);
+    lv_indev_set_group(indev, g);
+
 }
 
 static bool bq25896_init(void)

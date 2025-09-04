@@ -616,11 +616,12 @@ static scr_lifecycle_t screen1_1 = {
 static lv_obj_t *scr2_1_cont;
 
 static void scr2_1_btn_event_cb(lv_event_t * e)
-{
+{    
     if(e->code == LV_EVENT_CLICKED){
         scr_mgr_pop(false);
     }
 }
+
 
 #include "timezone_names.h"
 
@@ -628,10 +629,9 @@ static void create2_1(lv_obj_t *parent)
 {
     lv_obj_t* timezone_dd = lv_dropdown_create(parent);
     lv_dropdown_set_options_static(timezone_dd, timezone_names);
-
     lv_obj_align(timezone_dd, LV_ALIGN_TOP_MID, 0, 35);
 
-    lv_obj_t *back2_1_label = scr_back_btn_create(parent, ("About System"), scr2_1_btn_event_cb);
+    lv_obj_t *back2_1_label = scr_back_btn_create(parent, ("Time"), scr2_1_btn_event_cb);
 }
 static void entry2_1(void) 
 {
