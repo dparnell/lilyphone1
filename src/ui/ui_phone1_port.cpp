@@ -335,18 +335,6 @@ const char * ui_battert_27220_get_percent_level(void)
 
 
 //************************************[ screen 8 ]****************************************** A7682E
-bool ui_a7682_at_cb(const char *at_cmd)
-{
-    printf("[A7682E] at cmd: %s\n", at_cmd);
-
-    modem.sendAT("+CTTSPARAM=1,3,0,1,1");
-
-    delay(100);
-
-    modem.sendAT("+CTTS=2,\"1234567890\"");
-
-    return false;
-}
 
 void ui_a7682_call(const char *number)
 {
@@ -381,44 +369,3 @@ void ui_shutdown_on(void)
     PPM.shutdown();
     Serial.println("Shutdown .....");
 }
-
-//************************************[ screen 10 ]****************************************** PCM5102
-bool ui_pcm5102_cb(const char *at_cmd)
-{
-    audio.connecttoFS(SPIFFS, "/iphone_call.mp3");
-    return true;
-}
-
-void ui_pcm5102_stop(void)
-{
-    audio.stopSong();
-}
-
-// optional
-void audio_info(const char *info){
-    Serial.print("info        "); Serial.println(info);
-}
-// void audio_id3data(const char *info){  //id3 metadata
-//     Serial.print("id3data     ");Serial.println(info);
-// }
-// void audio_eof_mp3(const char *info){  //end of file
-//     Serial.print("eof_mp3     ");Serial.println(info);
-// }
-// void audio_showstation(const char *info){
-//     Serial.print("station     ");Serial.println(info);
-// }
-// void audio_showstreamtitle(const char *info){
-//     Serial.print("streamtitle ");Serial.println(info);
-// }
-// void audio_bitrate(const char *info){
-//     Serial.print("bitrate     ");Serial.println(info);
-// }
-// void audio_commercial(const char *info){  //duration in sec
-//     Serial.print("commercial  ");Serial.println(info);
-// }
-// void audio_icyurl(const char *info){  //homepage
-//     Serial.print("icyurl      ");Serial.println(info);
-// }
-// void audio_lasthost(const char *info){  //stream URL played
-//     Serial.print("lasthost    ");Serial.println(info);
-// }

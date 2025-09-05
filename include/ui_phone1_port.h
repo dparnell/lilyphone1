@@ -119,7 +119,6 @@ int ui_other_get_LTR(int *ch0, int *ch1, int *ps);
 int ui_other_get_gyro(float *gyro_x, float *gyro_y, float *gyro_z);
 
 // [ screen 8 ] --- A7682E
-bool ui_a7682_at_cb(const char *at_cmd);
 void ui_a7682_call(const char *number);
 void ui_a7682_hang_up(void);
 void ui_a7682_loop_resume(void);

@@ -22,25 +22,25 @@ extern "C" {
  *                                  TYPEDEFS
  * *******************************************************************************/
 enum {
-    SCREEN0_ID = 0,
+    SCREEN0_ID = 0, // menu
     SCREEN1_ID,
     SCREEN1_1_ID,
     SCREEN1_2_ID,
-    SCREEN2_ID,
-    SCREEN2_1_ID,
-    SCREEN2_2_ID,
-    SCREEN3_ID,
-    SCREEN4_ID,
-    SCREEN4_1_ID,
-    SCREEN4_2_ID,
-    SCREEN5_ID,
-    SCREEN6_ID,
+    SCREEN2_ID,    // config
+    SCREEN2_1_ID,  // time
+    SCREEN2_2_ID,  // settings
+    SCREEN3_ID,    // gps
+    SCREEN4_ID,    // wifi
+    SCREEN4_1_ID,  // wifi settings
+    SCREEN4_2_ID,  // wifi scan
+    SCREEN5_ID,    // test
+    SCREEN6_ID,    // battery
     SCREEN6_1_ID,
     SCREEN6_2_ID,
-    SCREEN8_ID,
-    SCREEN9_ID,
-    SCREEN10_ID,
-    SCREEN11_ID,
+    SCREEN8_ID,   // dial screen
+    SCREEN8_1_ID, // call screen
+    SCREEN9_ID,   // shutdown
+    SCREEN11_ID,  // sleep
 };
 
 typedef void (*ui_indev_read_cb)(int);

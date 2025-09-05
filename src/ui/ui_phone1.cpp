@@ -273,19 +273,6 @@ static void create0(lv_obj_t *parent)
     lv_obj_align(menu_screen2, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(menu_screen2, LV_OBJ_FLAG_HIDDEN);
 
-    if(ui_test_a7682e() == false)
-    {
-        for(int i = 0; i < GET_BUFF_LEN(menu_btn_list); i++)
-        {
-            if(menu_btn_list[i].idx == SCREEN8_ID)
-            {
-                menu_btn_list[i].idx = SCREEN10_ID;
-                menu_btn_list[i].name = "PCM5012";
-                menu_btn_list[i].icon = &img_PCM5102;
-            }
-        }
-    }
-
     for(int i = 0; i < MENU_BTN_NUM; i++) {
         if(i < 9) {
             menu_btn_create(menu_screen1, &menu_btn_list[i]);
