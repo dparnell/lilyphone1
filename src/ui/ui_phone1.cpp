@@ -624,6 +624,7 @@ static void scr2_1_btn_event_cb(lv_event_t * e)
 
 
 #include "timezone_names.h"
+extern bool updated_time_from_gps;
 
 static void create2_1(lv_obj_t *parent) 
 {
@@ -636,9 +637,12 @@ static void create2_1(lv_obj_t *parent)
 static void entry2_1(void) 
 {
     ui_disp_full_refr();
+    updated_time_from_gps = false;
+    gps_task_resume();
 }
 static void exit2_1(void) {
     ui_disp_full_refr();
+    gps_task_suspend();
 }
 static void destroy2_1(void) { }
 
@@ -1880,7 +1884,7 @@ static void create8(lv_obj_t *parent)
     lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, lv_pct(20));
     lv_obj_set_style_text_font(ta, &Font_Mono_Bold_20, LV_PART_MAIN);
     // lv_obj_add_state(ta, LV_STATE_FOCUSED); /*To be sure the cursor is visible*/
-    lv_obj_clear_flag(ta, LV_OBJ_FLAG_CLICKABLE);
+    // lv_obj_clear_flag(ta, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_text_letter_space(ta, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_line_space(ta, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 

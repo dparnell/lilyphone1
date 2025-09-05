@@ -17,7 +17,7 @@ static uint8_t gps_month=0, gps_day=0;
 static uint8_t gps_hour=0, gps_minute=0, gps_second=0;
 static uint32_t gps_vsat=0;
 
-static bool updated_time_from_gps = false;
+bool updated_time_from_gps = false;
 
 uint8_t buffer[256];
 
@@ -175,6 +175,7 @@ void displayInfo()
         Serial.print(F("."));
 
         if(!updated_time_from_gps) {
+            updated_time_from_gps = true;
             struct tm t = {0, 0, 0, 0, 0, 0, 0, 0, 0};
             t.tm_year = gps_year - 1900;    // This is year-1900, so 121 = 2021
             t.tm_mon = gps_month - 1;
