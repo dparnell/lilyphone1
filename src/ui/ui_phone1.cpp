@@ -4,6 +4,7 @@
 #include "stdio.h"
 #include "ui_phone1_port.h"
 #include "system_clock.h"
+#include "timezone_db.h"
 #include "Arduino.h"
 
 #define SETTING_PAGE_MAX_ITEM 7
@@ -101,6 +102,215 @@ static const char *line_full_format(int max_c, const char *str1, const char *str
     return (const char *)global_buf;
 }
 
+/* Modal confirmation over whatever screen is showing.
+ *
+ * Deleting is one tap and there is no undo, so every delete goes through here.
+ * The button map is file scope on purpose: lv_btnmatrix_set_map stores the
+ * array by pointer rather than copying it, and the dialog outlives the call
+ * that built it. Only one confirmation is ever up at a time. */
+static const char *ui_confirm_btns[3];
+static void (*ui_confirm_action)(void) = NULL;
+
+static void ui_confirm_event(lv_event_t *e)
+{
+    lv_obj_t *mbox = lv_event_get_current_target(e);
+    uint16_t  id   = lv_msgbox_get_active_btn(mbox);
+
+    void (*action)(void) = ui_confirm_action;
+    ui_confirm_action = NULL;
+
+    lv_msgbox_close(mbox);
+
+    if(id == 0 && action) action();
+    ui_disp_full_refr();
+}
+
+static void ui_confirm(const char *title, const char *body, const char *confirm_text,
+                       void (*action)(void))
+{
+    ui_confirm_btns[0] = confirm_text;
+    ui_confirm_btns[1] = "Cancel";
+    ui_confirm_btns[2] = "";
+    ui_confirm_action  = action;
+
+    lv_obj_t *mbox = lv_msgbox_create(NULL, title, body, ui_confirm_btns, false);
+    lv_obj_set_width(mbox, lv_pct(88));
+    lv_obj_set_style_bg_color(mbox, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(mbox, 2, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(mbox, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_font(mbox, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_center(mbox);
+
+    // The default modal backdrop is half-transparent black, which on a 1bpp
+    // panel dithers into noise. An opaque box with a hard border reads better.
+    lv_obj_set_style_bg_opa(lv_obj_get_parent(mbox), LV_OPA_TRANSP, LV_PART_MAIN);
+
+    lv_obj_add_event_cb(mbox, ui_confirm_event, LV_EVENT_VALUE_CHANGED, NULL);
+    ui_disp_full_refr();
+}
+
+/* A button in the top right of a screen, opposite the back button. */
+static lv_obj_t *scr_action_btn_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_btn_create(parent);
+    lv_obj_remove_style_all(btn);
+    lv_obj_set_size(btn, 34, 30);
+    lv_obj_align(btn, LV_ALIGN_TOP_RIGHT, -3, 3);
+    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_obj_center(label);
+    lv_obj_set_style_text_color(label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_text(label, symbol);
+
+    return btn;
+}
+
+/* The scrolling list body every app screen uses below its title bar. */
+static lv_obj_t *scr_app_list_create(lv_obj_t *parent)
+{
+    lv_obj_t *list = lv_list_create(parent);
+    lv_obj_set_size(list, lv_pct(96), LV_VER_RES - 36);
+    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_pad_all(list, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(list, 6, LV_PART_MAIN);
+    lv_obj_set_style_radius(list, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(list, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(list, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+    return list;
+}
+
+/* One tappable row: a bold first line and, optionally, a quieter second one.
+ * `badge` is drawn at the right of the first line - used for timestamps. */
+static lv_obj_t *scr_row_create(lv_obj_t *list, const char *title, const char *subtitle,
+                                const char *badge, lv_event_cb_t cb, void *user_data)
+{
+    lv_obj_t *row = lv_btn_create(list);
+    lv_obj_set_size(row, lv_pct(100), subtitle ? 46 : 34);
+    lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(row, 1, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(row, 4, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Both labels get an explicit height, not just a width. LV_LABEL_LONG_DOT
+    // wraps the text and only writes the ellipsis once it overflows the
+    // label's *height*, so a label left at LV_SIZE_CONTENT grows to fit the
+    // whole string and spills out over the rest of the list.
+    // A single glyph badge such as a tick only needs a sliver; a timestamp needs
+    // a column. Reserving the column either way would cut titles short for no
+    // reason - zone names run to thirty characters.
+    lv_coord_t badge_w = 0;
+    if(badge) badge_w = (strlen(badge) <= 4) ? 24 : 64;
+
+    lv_obj_t *first = lv_label_create(row);
+    lv_obj_set_style_text_font(first, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_label_set_long_mode(first, LV_LABEL_LONG_DOT);
+    lv_obj_set_size(first, 208 - badge_w, 18);
+    lv_label_set_text(first, title);
+    lv_obj_align(first, subtitle ? LV_ALIGN_TOP_LEFT : LV_ALIGN_LEFT_MID, 2, subtitle ? 1 : 0);
+
+    if(subtitle) {
+        lv_obj_t *second = lv_label_create(row);
+        lv_obj_set_style_text_font(second, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_label_set_long_mode(second, LV_LABEL_LONG_DOT);
+        lv_obj_set_size(second, 208, 16);
+        lv_label_set_text(second, subtitle);
+        lv_obj_align(second, LV_ALIGN_BOTTOM_LEFT, 2, -1);
+    }
+
+    if(badge) {
+        lv_obj_t *tag = lv_label_create(row);
+        lv_obj_set_style_text_font(tag, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_label_set_text(tag, badge);
+        lv_obj_align(tag, subtitle ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_RIGHT_MID, -2, subtitle ? 1 : 0);
+    }
+
+    lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, user_data);
+    return row;
+}
+
+/* Explains an empty list rather than leaving the user staring at blank paper. */
+static lv_obj_t *scr_empty_note_create(lv_obj_t *parent, const char *text)
+{
+    lv_obj_t *note = lv_label_create(parent);
+    lv_obj_set_width(note, lv_pct(90));
+    lv_obj_set_style_text_font(note, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(note, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(note, 60, LV_PART_MAIN);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(note, text);
+    return note;
+}
+
+/* A row of wide buttons across the bottom of a screen. */
+static lv_obj_t *scr_action_bar_create(lv_obj_t *parent, lv_coord_t height)
+{
+    lv_obj_t *bar = lv_obj_create(parent);
+    lv_obj_set_size(bar, lv_pct(96), height);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_set_style_bg_color(bar, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(bar, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(bar, 6, LV_PART_MAIN);
+    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    return bar;
+}
+
+static lv_obj_t *scr_bar_btn_create(lv_obj_t *bar, const char *text, lv_coord_t width,
+                                    lv_event_cb_t cb, void *user_data)
+{
+    lv_obj_t *btn = lv_btn_create(bar);
+    lv_obj_set_size(btn, width, 34);
+    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_obj_set_style_text_font(label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_label_set_text(label, text);
+    lv_obj_center(label);
+
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
+    return btn;
+}
+
+/* A labelled single-line text field. */
+static lv_obj_t *scr_field_create(lv_obj_t *parent, const char *label_text, lv_coord_t y,
+                                  const char *value, int max_len)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_style_text_font(label, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_text(label, label_text);
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 10, y);
+
+    lv_obj_t *ta = lv_textarea_create(parent);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, max_len);
+    lv_obj_set_width(ta, lv_pct(92));
+    lv_obj_set_style_text_font(ta, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+    lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, y + 16);
+    if(value && value[0]) lv_textarea_set_text(ta, value);
+
+    return ta;
+}
 #endif
 //************************************[ screen 0 ]****************************************** menu
 #if 1
@@ -649,8 +859,13 @@ static void scr2_1_btn_event_cb(lv_event_t * e)
 }
 
 
-#include "timezone_names.h"
 extern bool updated_time_from_gps;
+
+static void scr2_1_zone_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr_mgr_push(SCREEN2_1_1_ID, false);
+}
 
 static lv_obj_t   *scr2_1_status = NULL;
 static lv_timer_t *scr2_1_timer  = NULL;
@@ -670,21 +885,14 @@ static void scr2_1_render(void)
         strftime(when, sizeof(when), "%Y-%m-%d  %H:%M:%S", &now_tm);
     }
 
-    int  offset = system_clock_get_utc_offset();
-    char zone[24];
-    if(system_clock_has_utc_offset()) {
-        lv_snprintf(zone, sizeof(zone), "UTC%c%d:%02d", offset < 0 ? '-' : '+',
-                    abs(offset) / 60, abs(offset) % 60);
-    } else {
-        lv_snprintf(zone, sizeof(zone), "UTC (none reported)");
-    }
-
     char operator_name[MODEM_OPERATOR_LEN];
     ui_phone_get_operator(operator_name, sizeof(operator_name));
 
     lv_snprintf(line, sizeof(line),
-                "%s\n\nSource: %s\nZone: %s\nNetwork: %s",
-                when, system_clock_source_name(), zone,
+                "%s\n\nSource: %s\nZone: %s (%s)\nNetwork: %s",
+                when, system_clock_source_name(),
+                system_clock_zone_label(),
+                system_clock_zone_is_manual() ? "chosen" : "automatic",
                 ui_phone_is_registered() ? (operator_name[0] ? operator_name : "registered")
                                          : "searching");
 
@@ -708,9 +916,8 @@ static void create2_1(lv_obj_t *parent)
     lv_obj_align(scr2_1_status, LV_ALIGN_TOP_MID, 0, 40);
     scr2_1_render();
 
-    lv_obj_t* timezone_dd = lv_dropdown_create(parent);
-    lv_dropdown_set_options_static(timezone_dd, timezone_names);
-    lv_obj_align(timezone_dd, LV_ALIGN_TOP_MID, 0, 170);
+    lv_obj_t *bar = scr_action_bar_create(parent, 40);
+    scr_bar_btn_create(bar, LV_SYMBOL_SETTINGS "  Time zone", 150, scr2_1_zone_event, NULL);
 
     lv_obj_t *back2_1_label = scr_back_btn_create(parent, ("Time"), scr2_1_btn_event_cb);
 }
@@ -741,6 +948,180 @@ static scr_lifecycle_t screen2_1 = {
     .entry = entry2_1,
     .exit  = exit2_1,
     .destroy = destroy2_1,
+};
+#endif
+// --------------------- screen 2.1.1 --------------------- Time zone picker
+#if 1
+/* Four hundred odd zones do not fit in a dropdown, so this is a filter field
+ * over a list. The hardware keyboard types into the field and the list narrows
+ * as you go.
+ *
+ * The list is capped rather than paged: building four hundred rows would be
+ * both slow and expensive in widget memory, and a filter of even two characters
+ * brings the count under the cap. */
+#define SCR2_1_1_MAX_ROWS 24
+
+static lv_obj_t   *scr2_1_1_filter  = NULL;
+static lv_obj_t   *scr2_1_1_list    = NULL;
+static lv_obj_t   *scr2_1_1_count   = NULL;
+static lv_timer_t *scr2_1_1_debounce = NULL;
+
+static void scr2_1_1_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        scr_mgr_pop(false);
+    }
+}
+
+static void scr2_1_1_auto_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    system_clock_clear_zone();
+    scr_mgr_pop(false);
+}
+
+static void scr2_1_1_row_event(lv_event_t *e)
+{
+    int  idx = (int)(intptr_t)lv_event_get_user_data(e);
+    char name[TIMEZONE_NAME_MAX];
+
+    const char *posix = timezone_posix_at(idx);
+    if(posix == NULL || !timezone_name_at(idx, name, sizeof(name))) return;
+
+    system_clock_set_zone(name, posix);
+    scr_mgr_pop(false);
+}
+
+static void scr2_1_1_populate(void)
+{
+    int  matches[SCR2_1_1_MAX_ROWS];
+    int  total = 0;
+    char name[TIMEZONE_NAME_MAX];
+
+    const char *filter = lv_textarea_get_text(scr2_1_1_filter);
+    if(filter == NULL) filter = "";
+
+    lv_obj_clean(scr2_1_1_list);
+
+    int shown = timezone_search(filter, matches, SCR2_1_1_MAX_ROWS, &total);
+
+    // Rows are single line so as many zones as possible fit on the panel; a
+    // tick marks whichever one is currently in force.
+    const char *active = system_clock_zone_label();
+
+    // Following the network is the sensible default, so offer it first - but
+    // only when the list has not been filtered down to a search.
+    if(filter[0] == '\0') {
+        scr_row_create(scr2_1_1_list, "Automatic (network)", NULL,
+                       system_clock_zone_is_manual() ? NULL : LV_SYMBOL_OK,
+                       scr2_1_1_auto_event, NULL);
+    }
+
+    for(int i = 0; i < shown; i++) {
+        if(!timezone_name_at(matches[i], name, sizeof(name))) continue;
+
+        bool current = system_clock_zone_is_manual() && strcmp(name, active) == 0;
+        scr_row_create(scr2_1_1_list, name, NULL, current ? LV_SYMBOL_OK : NULL,
+                       scr2_1_1_row_event, (void *)(intptr_t)matches[i]);
+    }
+
+    if(total == 0) {
+        lv_label_set_text(scr2_1_1_count, "No zone matches that");
+    } else if(total > shown) {
+        lv_label_set_text_fmt(scr2_1_1_count, "%d of %d - keep typing", shown, total);
+    } else {
+        lv_label_set_text_fmt(scr2_1_1_count, "%d zone%s", total, total == 1 ? "" : "s");
+    }
+
+    ui_disp_full_refr();
+}
+
+/* Rebuilding on every keystroke would mean a full panel repaint per character,
+ * so the list is refreshed a short while after typing stops. */
+static void scr2_1_1_debounce_event(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    scr2_1_1_populate();
+
+    lv_timer_del(scr2_1_1_debounce);
+    scr2_1_1_debounce = NULL;
+}
+
+static void scr2_1_1_filter_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    if(scr2_1_1_debounce) {
+        lv_timer_reset(scr2_1_1_debounce);
+        return;
+    }
+    scr2_1_1_debounce = lv_timer_create(scr2_1_1_debounce_event, 450, NULL);
+}
+
+static void create2_1_1(lv_obj_t *parent)
+{
+    scr2_1_1_filter = lv_textarea_create(parent);
+    lv_textarea_set_one_line(scr2_1_1_filter, true);
+    lv_textarea_set_placeholder_text(scr2_1_1_filter, "Type to filter");
+    lv_textarea_set_max_length(scr2_1_1_filter, TIMEZONE_NAME_MAX - 1);
+    lv_obj_set_width(scr2_1_1_filter, lv_pct(94));
+    lv_obj_set_style_text_font(scr2_1_1_filter, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_align(scr2_1_1_filter, LV_ALIGN_TOP_MID, 0, 32);
+    lv_obj_add_event_cb(scr2_1_1_filter, scr2_1_1_filter_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+    scr2_1_1_count = lv_label_create(parent);
+    lv_obj_set_style_text_font(scr2_1_1_count, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr2_1_1_count, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_size(scr2_1_1_count, lv_pct(94), 16);
+    lv_label_set_long_mode(scr2_1_1_count, LV_LABEL_LONG_DOT);
+    lv_label_set_text(scr2_1_1_count, " ");
+    lv_obj_align(scr2_1_1_count, LV_ALIGN_TOP_MID, 0, 74);
+
+    scr2_1_1_list = lv_list_create(parent);
+    lv_obj_set_size(scr2_1_1_list, lv_pct(96), LV_VER_RES - 96);
+    lv_obj_align(scr2_1_1_list, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_pad_all(scr2_1_1_list, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(scr2_1_1_list, 6, LV_PART_MAIN);
+    lv_obj_set_style_radius(scr2_1_1_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scr2_1_1_list, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr2_1_1_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(scr2_1_1_list, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(scr2_1_1_list, LV_SCROLLBAR_MODE_OFF);
+
+    scr2_1_1_populate();
+
+    scr_back_btn_create(parent, "Time zone", scr2_1_1_back_event);
+}
+
+static void entry2_1_1(void)
+{
+    lv_group_focus_obj(scr2_1_1_filter);
+    ui_disp_full_refr();
+}
+
+static void exit2_1_1(void)
+{
+    if(scr2_1_1_debounce) {
+        lv_timer_del(scr2_1_1_debounce);
+        scr2_1_1_debounce = NULL;
+    }
+    ui_disp_full_refr();
+}
+
+static void destroy2_1_1(void)
+{
+    scr2_1_1_filter = NULL;
+    scr2_1_1_list   = NULL;
+    scr2_1_1_count  = NULL;
+}
+
+static scr_lifecycle_t screen2_1_1 = {
+    .create = create2_1_1,
+    .entry = entry2_1_1,
+    .exit  = exit2_1_1,
+    .destroy = destroy2_1_1,
 };
 #endif
 // --------------------- screen 2.2 --------------------- About System
@@ -2056,209 +2437,6 @@ static void ui_format_stamp(char *buf, int len, uint32_t ts)
     }
 }
 
-/* Modal confirmation over whatever screen is showing.
- *
- * Deleting is one tap and there is no undo, so every delete goes through here.
- * The button map is file scope on purpose: lv_btnmatrix_set_map stores the
- * array by pointer rather than copying it, and the dialog outlives the call
- * that built it. Only one confirmation is ever up at a time. */
-static const char *ui_confirm_btns[3];
-static void (*ui_confirm_action)(void) = NULL;
-
-static void ui_confirm_event(lv_event_t *e)
-{
-    lv_obj_t *mbox = lv_event_get_current_target(e);
-    uint16_t  id   = lv_msgbox_get_active_btn(mbox);
-
-    void (*action)(void) = ui_confirm_action;
-    ui_confirm_action = NULL;
-
-    lv_msgbox_close(mbox);
-
-    if(id == 0 && action) action();
-    ui_disp_full_refr();
-}
-
-static void ui_confirm(const char *title, const char *body, const char *confirm_text,
-                       void (*action)(void))
-{
-    ui_confirm_btns[0] = confirm_text;
-    ui_confirm_btns[1] = "Cancel";
-    ui_confirm_btns[2] = "";
-    ui_confirm_action  = action;
-
-    lv_obj_t *mbox = lv_msgbox_create(NULL, title, body, ui_confirm_btns, false);
-    lv_obj_set_width(mbox, lv_pct(88));
-    lv_obj_set_style_bg_color(mbox, DECKPRO_COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_text_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_border_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(mbox, 2, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(mbox, 0, LV_PART_MAIN);
-    lv_obj_set_style_text_font(mbox, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-    lv_obj_center(mbox);
-
-    // The default modal backdrop is half-transparent black, which on a 1bpp
-    // panel dithers into noise. An opaque box with a hard border reads better.
-    lv_obj_set_style_bg_opa(lv_obj_get_parent(mbox), LV_OPA_TRANSP, LV_PART_MAIN);
-
-    lv_obj_add_event_cb(mbox, ui_confirm_event, LV_EVENT_VALUE_CHANGED, NULL);
-    ui_disp_full_refr();
-}
-
-/* A button in the top right of a screen, opposite the back button. */
-static lv_obj_t *scr_action_btn_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb)
-{
-    lv_obj_t *btn = lv_btn_create(parent);
-    lv_obj_remove_style_all(btn);
-    lv_obj_set_size(btn, 34, 30);
-    lv_obj_align(btn, LV_ALIGN_TOP_RIGHT, -3, 3);
-    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *label = lv_label_create(btn);
-    lv_obj_center(label);
-    lv_obj_set_style_text_color(label, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_label_set_text(label, symbol);
-
-    return btn;
-}
-
-/* The scrolling list body every app screen uses below its title bar. */
-static lv_obj_t *scr_app_list_create(lv_obj_t *parent)
-{
-    lv_obj_t *list = lv_list_create(parent);
-    lv_obj_set_size(list, lv_pct(96), LV_VER_RES - 36);
-    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_pad_all(list, 2, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(list, 6, LV_PART_MAIN);
-    lv_obj_set_style_radius(list, 0, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(list, DECKPRO_COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(list, 0, LV_PART_MAIN);
-    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
-    return list;
-}
-
-/* One tappable row: a bold first line and, optionally, a quieter second one.
- * `badge` is drawn at the right of the first line - used for timestamps. */
-static lv_obj_t *scr_row_create(lv_obj_t *list, const char *title, const char *subtitle,
-                                const char *badge, lv_event_cb_t cb, void *user_data)
-{
-    lv_obj_t *row = lv_btn_create(list);
-    lv_obj_set_size(row, lv_pct(100), subtitle ? 46 : 34);
-    lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-    lv_obj_set_style_outline_width(row, 1, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_shadow_width(row, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(row, 4, LV_PART_MAIN);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Both labels get an explicit height, not just a width. LV_LABEL_LONG_DOT
-    // wraps the text and only writes the ellipsis once it overflows the
-    // label's *height*, so a label left at LV_SIZE_CONTENT grows to fit the
-    // whole string and spills out over the rest of the list.
-    lv_obj_t *first = lv_label_create(row);
-    lv_obj_set_style_text_font(first, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-    lv_label_set_long_mode(first, LV_LABEL_LONG_DOT);
-    lv_obj_set_size(first, badge ? 146 : 208, 18);
-    lv_label_set_text(first, title);
-    lv_obj_align(first, subtitle ? LV_ALIGN_TOP_LEFT : LV_ALIGN_LEFT_MID, 2, subtitle ? 1 : 0);
-
-    if(subtitle) {
-        lv_obj_t *second = lv_label_create(row);
-        lv_obj_set_style_text_font(second, FONT_BOLD_SIZE_14, LV_PART_MAIN);
-        lv_label_set_long_mode(second, LV_LABEL_LONG_DOT);
-        lv_obj_set_size(second, 208, 16);
-        lv_label_set_text(second, subtitle);
-        lv_obj_align(second, LV_ALIGN_BOTTOM_LEFT, 2, -1);
-    }
-
-    if(badge) {
-        lv_obj_t *tag = lv_label_create(row);
-        lv_obj_set_style_text_font(tag, FONT_BOLD_SIZE_14, LV_PART_MAIN);
-        lv_label_set_text(tag, badge);
-        lv_obj_align(tag, LV_ALIGN_TOP_RIGHT, -2, 1);
-    }
-
-    lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, user_data);
-    return row;
-}
-
-/* Explains an empty list rather than leaving the user staring at blank paper. */
-static lv_obj_t *scr_empty_note_create(lv_obj_t *parent, const char *text)
-{
-    lv_obj_t *note = lv_label_create(parent);
-    lv_obj_set_width(note, lv_pct(90));
-    lv_obj_set_style_text_font(note, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-    lv_obj_set_style_text_color(note, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(note, 60, LV_PART_MAIN);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(note, text);
-    return note;
-}
-
-/* A row of wide buttons across the bottom of a screen. */
-static lv_obj_t *scr_action_bar_create(lv_obj_t *parent, lv_coord_t height)
-{
-    lv_obj_t *bar = lv_obj_create(parent);
-    lv_obj_set_size(bar, lv_pct(96), height);
-    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -4);
-    lv_obj_set_style_bg_color(bar, DECKPRO_COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_column(bar, 6, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(bar, 6, LV_PART_MAIN);
-    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-    return bar;
-}
-
-static lv_obj_t *scr_bar_btn_create(lv_obj_t *bar, const char *text, lv_coord_t width,
-                                    lv_event_cb_t cb, void *user_data)
-{
-    lv_obj_t *btn = lv_btn_create(bar);
-    lv_obj_set_size(btn, width, 34);
-    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_text_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_border_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
-
-    lv_obj_t *label = lv_label_create(btn);
-    lv_obj_set_style_text_font(label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-    lv_label_set_text(label, text);
-    lv_obj_center(label);
-
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
-    return btn;
-}
-
-/* A labelled single-line text field. */
-static lv_obj_t *scr_field_create(lv_obj_t *parent, const char *label_text, lv_coord_t y,
-                                  const char *value, int max_len)
-{
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_style_text_font(label, FONT_BOLD_SIZE_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_label_set_text(label, label_text);
-    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 10, y);
-
-    lv_obj_t *ta = lv_textarea_create(parent);
-    lv_textarea_set_one_line(ta, true);
-    lv_textarea_set_max_length(ta, max_len);
-    lv_obj_set_width(ta, lv_pct(92));
-    lv_obj_set_style_text_font(ta, FONT_BOLD_SIZE_16, LV_PART_MAIN);
-    lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, y + 16);
-    if(value && value[0]) lv_textarea_set_text(ta, value);
-
-    return ta;
-}
 #endif
 //************************************[ screen 8 ]****************************************** dialer
 #if 1
@@ -3703,6 +3881,7 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN1_1_ID,  &screen1_1);    // - Auto send
     scr_mgr_register(SCREEN2_ID,    &screen2);      // Setting
     scr_mgr_register(SCREEN2_1_ID,  &screen2_1);    //  - Time
+    scr_mgr_register(SCREEN2_1_1_ID,&screen2_1_1);  //     - time zone picker
     scr_mgr_register(SCREEN2_2_ID,  &screen2_2);    //  - About System
     scr_mgr_register(SCREEN3_ID,    &screen3);      // 
     scr_mgr_register(SCREEN4_ID,    &screen4);      // WIFI

@@ -10,6 +10,7 @@
 #include "peripheral.h"
 #include "modem_service.h"
 #include "phone_store.h"
+#include "system_clock.h"
 #include <Preferences.h>
 
 Preferences preferences;
@@ -411,6 +412,9 @@ void setup() {
   peri_init_st[E_PERI_GPS]        = gps_init();
   peri_init_st[E_PERI_BHI260AP]   = BHI260AP_init();
   peri_init_st[E_PERI_LTR_553ALS] = LTR553_init();
+  // Restore the chosen time zone before anything renders a clock.
+  system_clock_init();
+
   peri_init_st[E_PERI_A7682E]     = A7682E_init();
 
   phone_store_init();

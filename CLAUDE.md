@@ -90,4 +90,10 @@ Horizontal swipes are detected separately by `indev_get_gesture_dir` polling the
 
 ### Clock
 
-There is no RTC. The system clock is set once per boot from GPS (`peri_gps.cpp`, guarded by `updated_time_from_gps`), so `time(NULL)` returns near-zero until a fix lands — timestamps are stored as 0 and rendered as `--:--` in that state.
+There is no RTC, and two things can say what time it is: a GPS fix and the cellular network (NITZ, read back with `AT+CCLK?`). Both go through `src/apps/system_clock.cpp`, which arbitrates by source — GPS outranks the network, each may refresh itself — and owns the time zone.
+
+`time(NULL)` returns near-zero until one of them lands; timestamps are stored as 0 and rendered as `--:--` in that state.
+
+**Do not use `mktime()` to turn a UTC time into an epoch here.** It reads its input as *local* time, so it is wrong by the zone offset as soon as a zone is in force — which it now is, since the network reports one. Use `system_clock_epoch_from_utc()`, which does the conversion arithmetically. The `day` it takes may sit one outside the month, which is what a caller subtracting a UTC offset gets for free when it steps over midnight.
+
+Zones come from `timezone_db` (461 IANA names with full POSIX DST rules, in `include/timezone_names.h`). That header is large and defines its data `static`, so exactly one translation unit includes it — go through `timezone_db.h`. A zone chosen by hand persists in NVS and suppresses the network's offset, since a fixed offset cannot express daylight saving.

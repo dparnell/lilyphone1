@@ -10,13 +10,28 @@
  * the clock out by the offset.
  */
 #include <Arduino.h>
+#include <Preferences.h>
 #include <sys/time.h>
 #include <time.h>
 #include "system_clock.h"
+#include "timezone_db.h"
+
+#define CLOCK_PREFS_NAMESPACE "clock"
+#define CLOCK_PREFS_ZONE      "tz_name"
 
 static clock_source_t clock_src        = CLOCK_SRC_NONE;
 static int            clock_offset_min = 0;
 static bool           clock_offset_set = false;
+
+static bool clock_zone_manual = false;
+static char clock_zone_label[TIMEZONE_NAME_MAX] = "UTC";
+
+static void clock_apply_tz(const char *posix)
+{
+    setenv("TZ", posix, 1);
+    tzset();
+    Serial.printf("[CLOCK] TZ=%s\n", posix);
+}
 
 /* Days between 1970-01-01 and the given civil date, proleptic Gregorian and
  * valid for any year. Howard Hinnant's days_from_civil. */
@@ -77,10 +92,15 @@ void system_clock_set_utc_offset(int minutes)
 {
     // Sanity: real zones run from UTC-12 to UTC+14.
     if(minutes < -12 * 60 || minutes > 14 * 60) return;
-    if(clock_offset_set && clock_offset_min == minutes) return;
+
+    // Remember what the network said even while a manual zone is in force, so
+    // clearing the zone can fall straight back to it.
+    bool changed = !clock_offset_set || clock_offset_min != minutes;
 
     clock_offset_min = minutes;
     clock_offset_set = true;
+
+    if(clock_zone_manual || !changed) return;
 
     // POSIX writes the offset as the amount to ADD to local time to reach UTC,
     // so the sign is inverted against the usual "UTC+10" way of saying it.
@@ -88,10 +108,82 @@ void system_clock_set_utc_offset(int minutes)
     char tz[24];
     snprintf(tz, sizeof(tz), "UTC%c%d:%02d", posix < 0 ? '-' : '+', abs(posix) / 60, abs(posix) % 60);
 
-    setenv("TZ", tz, 1);
-    tzset();
+    snprintf(clock_zone_label, sizeof(clock_zone_label), "UTC%c%d:%02d",
+             minutes < 0 ? '-' : '+', abs(minutes) / 60, abs(minutes) % 60);
 
-    Serial.printf("[CLOCK] local offset %+d min, TZ=%s\n", minutes, tz);
+    clock_apply_tz(tz);
+}
+
+void system_clock_set_zone(const char *name, const char *posix)
+{
+    if(name == NULL || posix == NULL || name[0] == '\0' || posix[0] == '\0') return;
+
+    clock_zone_manual = true;
+    snprintf(clock_zone_label, sizeof(clock_zone_label), "%s", name);
+    clock_apply_tz(posix);
+
+    Preferences prefs;
+    if(prefs.begin(CLOCK_PREFS_NAMESPACE, false)) {
+        prefs.putString(CLOCK_PREFS_ZONE, name);
+        prefs.end();
+    }
+}
+
+void system_clock_clear_zone(void)
+{
+    clock_zone_manual = false;
+
+    Preferences prefs;
+    if(prefs.begin(CLOCK_PREFS_NAMESPACE, false)) {
+        prefs.remove(CLOCK_PREFS_ZONE);
+        prefs.end();
+    }
+
+    if(clock_offset_set) {
+        // Re-apply the network's offset, which set_utc_offset skipped while the
+        // manual zone was in force.
+        int saved = clock_offset_min;
+        clock_offset_set = false;
+        system_clock_set_utc_offset(saved);
+    } else {
+        snprintf(clock_zone_label, sizeof(clock_zone_label), "UTC");
+        clock_apply_tz("UTC0");
+    }
+}
+
+bool system_clock_zone_is_manual(void)
+{
+    return clock_zone_manual;
+}
+
+const char *system_clock_zone_label(void)
+{
+    return clock_zone_label;
+}
+
+void system_clock_init(void)
+{
+    // Start from a known zone rather than whatever the C library defaults to.
+    clock_apply_tz("UTC0");
+
+    Preferences prefs;
+    if(!prefs.begin(CLOCK_PREFS_NAMESPACE, true)) return;
+
+    String saved = prefs.getString(CLOCK_PREFS_ZONE, "");
+    prefs.end();
+
+    if(saved.length() == 0) return;
+
+    int idx = timezone_find(saved.c_str());
+    const char *posix = timezone_posix_at(idx);
+    if(posix == NULL) {
+        Serial.printf("[CLOCK] saved zone '%s' is not in the table\n", saved.c_str());
+        return;
+    }
+
+    clock_zone_manual = true;
+    snprintf(clock_zone_label, sizeof(clock_zone_label), "%s", saved.c_str());
+    clock_apply_tz(posix);
 }
 
 bool system_clock_is_set(void)

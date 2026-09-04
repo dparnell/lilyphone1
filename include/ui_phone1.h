@@ -29,6 +29,7 @@ enum {
     SCREEN1_2_ID,
     SCREEN2_ID,    // config
     SCREEN2_1_ID,  // time
+    SCREEN2_1_1_ID,// time zone picker
     SCREEN2_2_ID,  // settings
     SCREEN3_ID,    // gps
     SCREEN4_ID,    // wifi
