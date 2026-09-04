@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Keeping the README current
+
+`README.md` is part of the deliverable for feature work, not a follow-up task.
+Any change that adds a feature, removes one, or alters how an existing one
+behaves **from the user's point of view** updates the README in the same commit
+as the code. Someone reading it should never find it describing a version of the
+phone that no longer exists.
+
+Internal work - a bug fix, a refactor, a performance change that does not alter
+what the phone does - does not need a README edit; that detail belongs here
+instead. The two files have different audiences: the README says what the phone
+does and how to build it, this file says how the code is put together and which
+traps to avoid.
+
 ## What this is
 
 Firmware for a LilyGo T-Deck-Pro (ESP32-S3, 16MB flash, 8MB PSRAM) turned into a phone: e-paper display, physical keyboard, cellular modem, LoRa, GPS. PlatformIO + Arduino framework + LVGL 8.3.
