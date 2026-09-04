@@ -35,6 +35,10 @@ Everything is vendored under `lib/` (LVGL, GxEPD2, TinyGSM, RadioLib, SensorLib,
 
 LVGL is configured by `include/lv_conf.h`, force-included via a build flag. Notable consequences: `LV_MEM_SIZE` is only 48KB, and margin style properties (`lv_obj_set_style_margin_*`) do **not** exist in this build — offset a child by positioning it, not by margins. Only Montserrat 14/18/26 are compiled in; the project's own `Font_Mono_Bold_*` fonts (`src/assets/`) cover ASCII 32..126 **only**, so any label showing an `LV_SYMBOL_*` glyph must be left on a Montserrat font.
 
+**`LV_LABEL_LONG_DOT` needs a height, not just a width.** It wraps the text and only writes the ellipsis once the text overflows the label's *height*, so a label left at the default `LV_SIZE_CONTENT` height silently grows downward to fit the whole string and paints over whatever is below it. This has produced garbled screens twice. Any label holding text of unpredictable length — a contact name, a number, a message body — needs `lv_obj_set_size()` with an explicit height. The `Font_Mono_Bold_*` fonts are monospace with a `line_height` of 18 (21 for size 20), and advance widths of 134/144/154 in 1/16px for sizes 14/15/16 — i.e. 8.4/9.0/9.6px per character, which is what to divide by when working out how much text a given width holds.
+
+Message bodies additionally carry the sender's own line breaks, so anything rendering one on a single line must flatten it first (`ui_message_snippet()` in `ui_phone1.cpp`).
+
 ## Architecture
 
 ### Display: everything is e-paper

@@ -57,7 +57,9 @@ static lv_obj_t *scr_back_btn_create(lv_obj_t *parent, const char *text, lv_even
         lv_obj_set_style_text_font(title, FONT_BOLD_SIZE_16, LV_PART_MAIN);
         lv_obj_set_style_text_color(title, DECKPRO_COLOR_FG, LV_PART_MAIN);
         lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(title, LV_HOR_RES - 80);
+        // A height as well as a width, or a title longer than the bar wraps to
+        // a second line and lands on top of the screen content below it.
+        lv_obj_set_size(title, LV_HOR_RES - 80, 18);
         lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_label_set_text(title, text);
         lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
@@ -2279,7 +2281,7 @@ static void create8(lv_obj_t *parent)
     lv_obj_set_style_text_font(scr8_name_label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
     lv_obj_set_style_text_color(scr8_name_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_label_set_long_mode(scr8_name_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(scr8_name_label, lv_pct(94));
+    lv_obj_set_size(scr8_name_label, lv_pct(94), 18);
     lv_obj_set_style_text_align(scr8_name_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_text(scr8_name_label, " ");
     lv_obj_align(scr8_name_label, LV_ALIGN_TOP_MID, 0, 84);
@@ -2426,6 +2428,7 @@ static void create8_1(lv_obj_t *parent)
     lv_obj_set_style_text_color(sub, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(sub, 18);
     lv_label_set_text(sub, (strcmp(name, number) == 0) ? " " : number);
     lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, 126);
 
@@ -2644,6 +2647,7 @@ static void create12_1(lv_obj_t *parent)
     lv_obj_set_style_text_color(number_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_obj_set_style_text_align(number_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_long_mode(number_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(number_label, 18);
     lv_label_set_text(number_label, ui_active_number);
     lv_obj_align(number_label, LV_ALIGN_TOP_MID, 0, 104);
 
@@ -3212,6 +3216,7 @@ static void create13_2(lv_obj_t *parent)
     lv_obj_set_style_text_font(scr13_2_to_label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
     lv_obj_set_style_text_color(scr13_2_to_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_label_set_long_mode(scr13_2_to_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(scr13_2_to_label, 18);
     lv_obj_align(scr13_2_to_label, LV_ALIGN_TOP_LEFT, 10, 38);
     scr13_2_update_to();
 
