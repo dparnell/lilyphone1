@@ -130,6 +130,18 @@ There is **no independent speaker path**. `BOARD_I2S_BCLK/DOUT/LRC` in `utilitie
 
 The modem is the only route to a speaker, via `modem_play_tone()` (`AT+CPTONE`). Whether a speaker is fitted and whether the firmware implements that command is unverified; an unsupported module answers ERROR and nothing happens, which is why the sound setting defaults to off.
 
+### MeshCore
+
+`src/apps/mesh_net.cpp` runs a MeshCore node and **owns the SX1262** — the vendor's `peri_lora.cpp` demo was removed because two drivers cannot share one radio. It runs on its own task, not an LVGL timer: a missed receive window loses a packet, and the LVGL task blocks for hundreds of milliseconds pushing frames to the panel.
+
+Three things about the vendored dependencies are easy to trip over:
+
+- **RadioLib had to go to 7.x.** MeshCore uses `getIrqFlags()`, `clearIrqFlags()` and the `RADIOLIB_IRQ_*` constants, none of which exist in the 6.4.2 the project used to carry. This was safe only because retiring the LoRa demo left no other RadioLib user.
+- **RadioLib is built with `RADIOLIB_GODMODE=1`** (in `platformio.ini`), because MeshCore reaches into `SX126x::mod`, `spreadingFactor` and `freqMHz`, which are otherwise private. That is how MeshCore builds it upstream.
+- **`lib/MeshCore` is a curated subset**, not the upstream tree: upstream ships ~48 helpers for boards this project does not have (nRF52, STM32, RP2040, ethernet, BLE, sensors), and PlatformIO compiles everything under `lib/*/src`. Adding a MeshCore feature may mean vendoring another helper. Ed25519 comes from MeshCore's own bundled copy (`lib/ed25519`), while SHA-256 and AES come from `lib/Crypto`.
+
+The board adapter, radio settings and advertisement handling are all in `mesh_net.cpp`; the pin and region defines are build flags in `platformio.ini`.
+
 ### Storage
 
 `src/apps/phone_store.cpp` keeps contacts and a bounded message log in PSRAM, mirrored to SPIFFS as TSV (`/contacts.tsv`, `/messages.tsv`); each mutation rewrites the file. It is **not** thread-safe — only the LVGL task may call into it, which is why received messages arrive via a queue rather than being written by the modem task.

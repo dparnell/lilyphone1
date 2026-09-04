@@ -1,24 +1,24 @@
 /*
-   RadioLib Pager (POCSAG) Receive Example
+  RadioLib Pager (POCSAG) Receive Example
 
-   This example shows how to receive FSK packets without using
-   SX127x packet engine.
+  This example shows how to receive FSK packets without using
+  SX127x packet engine.
 
-   This example receives POCSAG messages using SX1278's
-   FSK modem in direct mode.
+  This example receives POCSAG messages using SX1278's
+  FSK modem in direct mode.
 
-   Other modules that can be used to receive POCSAG:
-    - SX127x/RFM9x
-    - RF69
-    - SX1231
-    - CC1101
-    - Si443x/RFM2x
+  Other modules that can be used to receive POCSAG:
+  - SX127x/RFM9x
+  - RF69
+  - SX1231
+  - CC1101
+  - Si443x/RFM2x
 
-   For default module settings, see the wiki page
-   https://github.com/jgromes/RadioLib/wiki/Default-configuration#sx127xrfm9x---lora-modem
+  For default module settings, see the wiki page
+  https://github.com/jgromes/RadioLib/wiki/Default-configuration#sx127xrfm9x---lora-modem
 
-   For full API reference, see the GitHub Pages
-   https://jgromes.github.io/RadioLib/
+  For full API reference, see the GitHub Pages
+  https://jgromes.github.io/RadioLib/
 */
 
 // include the library
@@ -39,15 +39,18 @@ SX1278 radio = new Module(10, 2, 9, 3);
 // SX1231:        DIO2
 // CC1101:        GDO2
 // Si443x/RFM2x:  GPIO
-// SX126x/LLCC68: DIO2
 const int pin = 5;
 
 // create Pager client instance using the FSK module
 PagerClient pager(&radio);
 
-// or using RadioShield
-// https://github.com/jgromes/RadioShield
-//SX1278 radio = RadioShield.ModuleA;
+// or detect the pinout automatically using RadioBoards
+// https://github.com/radiolib-org/RadioBoards
+/*
+#define RADIO_BOARD_AUTO
+#include <RadioBoards.h>
+Radio radio = new RadioModule();
+*/
 
 void setup() {
   Serial.begin(9600);
@@ -65,7 +68,7 @@ void setup() {
   } else {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true);
+    while (true) { delay(10); }
   }
 
   // initialize Pager client
@@ -78,7 +81,7 @@ void setup() {
   } else {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true);
+    while (true) { delay(10); }
   }
 
   // start receiving POCSAG messages
@@ -90,7 +93,7 @@ void setup() {
   } else {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true);
+    while (true) { delay(10); }
   }
 
 }

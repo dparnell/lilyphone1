@@ -38,15 +38,6 @@ void ui_disp_full_refr(void);
  * seconds after the last update, which is too late before a deep sleep. */
 void ui_disp_hibernate(void);
 
-// [ screen 1 ] --- lora
-float ui_lora_get_freq(void);
-int ui_lora_get_mode(void);
-void ui_lora_set_mode(int mode);
-void ui_lora_send(const char *str);
-void ui_lora_recv_loop(void);
-bool ui_lora_get_recv(const char **str, int *rssi);
-void ui_lora_set_recv_flag(void);
-
 // [ screen 2 ] --- setting
 void ui_setting_set_language(int language);
 void ui_setting_set_keypad_light(bool on);

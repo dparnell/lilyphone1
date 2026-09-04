@@ -1,0 +1,6 @@
+{
+    "name": "ed25519",
+    "version": "1.0.0",
+    "description": "Orlp/Nightcracker Ed25519, as bundled by MeshCore.",
+    "license": "Zlib"
+}

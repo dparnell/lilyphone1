@@ -16,7 +16,7 @@ stay out of the way when it is in a pocket.
 | SoC | ESP32-S3, 16MB flash, 8MB PSRAM |
 | Display | 3.1" 240×320 e-paper, 1 bit per pixel (GDEQ031T10) |
 | Input | CST328 touch panel, TCA8418 physical keyboard |
-| Cellular | A7682E modem — voice, SMS, network time |
+| Cellular | A7682E modem — voice, SMS, network time. Its WiFi is receive-only (used for positioning), so it cannot act as an access point |
 | Also fitted | SX1262 LoRa, u-blox GPS, BQ25896 charger, BQ27220 fuel gauge, LTR-553ALS, BHI260AP |
 
 ## What it does
@@ -72,11 +72,20 @@ Two things to know before relying on it:
   channel, not a usable internet connection. Set a small MTU on the tunnel;
   anything over 1472 bytes is dropped rather than fragmented.
 
+**Mesh.** The phone is a [MeshCore](https://docs.meshcore.io/) node. It carries
+its own Ed25519 identity, announces itself on the LoRa network, and lists the
+nodes it hears with their signal and hop count. Messaging over the mesh is not
+wired up yet - this layer establishes the radio, the crypto and the protocol.
+The node listens and speaks for itself but does not relay for others, since a
+phone in a pocket makes a poor repeater and forwarding costs battery.
+
+This replaced the vendor's LoRa demo screens: MeshCore expects to own the
+SX1262, and two drivers cannot share one radio.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 
-Also inherited from the vendor firmware, and left working: LoRa send and
-receive, a GPS readout, a WiFi access-point configuration screen, battery and
+Also inherited from the vendor firmware, and left working: a GPS readout, a WiFi access-point configuration screen, battery and
 charger detail, and a peripheral self test.
 
 ## Building
@@ -119,7 +128,8 @@ src/main.cpp          board bring-up, the LVGL display and input drivers
 src/ui/               every screen (ui_phone1.cpp), the hardware wrappers they
                       call (ui_phone1_port.cpp), and the screen stack
 src/peripherals/      one file per device; peri_modem.cpp owns the modem
-src/apps/             contacts and message storage, the clock, the zone table
+src/apps/             contacts and message storage, the clock, the zone table,
+                      the MeshCore node, the hotspot relay
 src/assets/           fonts and icons, some generated
 tools/                the emoji font generator
 ```

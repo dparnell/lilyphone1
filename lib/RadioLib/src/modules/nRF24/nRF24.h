@@ -123,6 +123,8 @@
 #define RADIOLIB_NRF24_RF_PWR_12_DBM                            0b00000010  //  2     1                 -12 dBm
 #define RADIOLIB_NRF24_RF_PWR_6_DBM                             0b00000100  //  2     1                 -6 dBm
 #define RADIOLIB_NRF24_RF_PWR_0_DBM                             0b00000110  //  2     1                 0 dBm (default)
+#define RADIOLIB_NRF24_RF_LNA_OFF                               0b00000000  //  0     0   LNA gain: Off
+#define RADIOLIB_NRF24_RF_LNA_ON                                0b00000001  //  0     0             On
 
 // RADIOLIB_NRF24_REG_STATUS
 #define RADIOLIB_NRF24_RX_DR                                    0b01000000  //  6     6   Rx data ready
@@ -193,7 +195,7 @@ class nRF24: public PhysicalLayer {
       \brief Default constructor.
       \param mod Instance of Module that will be used to communicate with the radio.
     */
-    nRF24(Module* mod);
+    nRF24(Module* mod); // cppcheck-suppress noExplicitConstructor
 
     // basic methods
 
@@ -215,7 +217,7 @@ class nRF24: public PhysicalLayer {
       \brief Sets the module to sleep mode.
       \returns \ref status_codes
     */
-    int16_t sleep();
+    int16_t sleep() override;
 
     /*!
       \brief Sets the module to standby mode.
@@ -238,16 +240,18 @@ class nRF24: public PhysicalLayer {
       \param addr Dummy address parameter, to ensure PhysicalLayer compatibility.
       \returns \ref status_codes
     */
-    int16_t transmit(uint8_t* data, size_t len, uint8_t addr) override;
+    int16_t transmit(const uint8_t* data, size_t len, uint8_t addr) override;
 
     /*!
-      \brief Blocking binary receive method.
-      Overloads for string-based transmissions are implemented in PhysicalLayer.
-      \param data Binary data to be sent.
-      \param len Number of bytes to send.
+      \brief Binary receive method. Will attempt to receive arbitrary binary data up to 64 bytes long.
+      For overloads to receive Arduino String, see PhysicalLayer::receive.
+      \param data Pointer to array to save the received binary data.
+      \param len Number of bytes that will be received. Must be known in advance for binary transmissions.
+      \param timeout Reception timeout in milliseconds. If set to 0,
+      timeout period will be calculated automatically based on the radio configuration.
       \returns \ref status_codes
     */
-    int16_t receive(uint8_t* data, size_t len) override;
+    int16_t receive(uint8_t* data, size_t len, RadioLibTime_t timeout = 0) override;
 
     /*!
       \brief Starts direct mode transmission.
@@ -279,23 +283,23 @@ class nRF24: public PhysicalLayer {
       \brief Sets interrupt service routine to call when a packet is received.
       \param func ISR to call.
     */
-    void setPacketReceivedAction(void (*func)(void));
+    void setPacketReceivedAction(void (*func)(void)) override;
 
     /*!
       \brief Clears interrupt service routine to call when a packet is received.
     */
-    void clearPacketReceivedAction();
+    void clearPacketReceivedAction() override;
 
     /*!
       \brief Sets interrupt service routine to call when a packet is sent.
       \param func ISR to call.
     */
-    void setPacketSentAction(void (*func)(void));
+    void setPacketSentAction(void (*func)(void)) override;
 
     /*!
       \brief Clears interrupt service routine to call when a packet is sent.
     */
-    void clearPacketSentAction();
+    void clearPacketSentAction() override;
 
     /*!
       \brief Interrupt-driven binary transmit method. IRQ will be activated when full packet is transmitted.
@@ -305,7 +309,7 @@ class nRF24: public PhysicalLayer {
       \param addr Dummy address parameter, to ensure PhysicalLayer compatibility.
       \returns \ref status_codes
     */
-    int16_t startTransmit(uint8_t* data, size_t len, uint8_t addr) override;
+    int16_t startTransmit(const uint8_t* data, size_t len, uint8_t addr) override;
 
     /*!
       \brief Clean up after transmission is done.
@@ -317,7 +321,7 @@ class nRF24: public PhysicalLayer {
       \brief Interrupt-driven receive method. IRQ will be activated when full packet is received.
       \returns \ref status_codes
     */
-    int16_t startReceive();
+    int16_t startReceive() override;
 
     /*!
       \brief Interrupt-driven receive method, implemented for compatibility with PhysicalLayer.
@@ -327,7 +331,7 @@ class nRF24: public PhysicalLayer {
       \param len Ignored.
       \returns \ref status_codes
     */
-    int16_t startReceive(uint32_t timeout, uint16_t irqFlags, uint16_t irqMask, size_t len);
+    int16_t startReceive(uint32_t timeout, uint32_t irqFlags, uint32_t irqMask, size_t len) override;
 
     /*!
       \brief Reads data received after calling startReceive method. When the packet length is not known in advance,
@@ -338,6 +342,12 @@ class nRF24: public PhysicalLayer {
     */
     int16_t readData(uint8_t* data, size_t len) override;
 
+    /*!
+      \brief Clean up after reception is done.
+      \returns \ref status_codes
+    */
+    int16_t finishReceive() override;
+
     // configuration methods
 
     /*!
@@ -345,21 +355,21 @@ class nRF24: public PhysicalLayer {
       \param freq Carrier frequency to be set in MHz.
       \returns \ref status_codes
     */
-    int16_t setFrequency(float freq);
+    int16_t setFrequency(float freq) override;
 
     /*!
       \brief Sets bit rate. Allowed values are 2000, 1000 or 250 kbps.
       \param br Bit rate to be set in kbps.
       \returns \ref status_codes
     */
-    int16_t setBitRate(float br);
+    int16_t setBitRate(float br) override;
 
     /*!
       \brief Sets output power. Allowed values are -18, -12, -6 or 0 dBm.
       \param pwr Output power to be set in dBm.
       \returns \ref status_codes
     */
-    int16_t setOutputPower(int8_t pwr);
+    int16_t setOutputPower(int8_t pwr) override;
 
     /*!
       \brief Sets address width of transmit and receive pipes in bytes. Allowed values are 3, 4 or 5 bytes.
@@ -374,7 +384,7 @@ class nRF24: public PhysicalLayer {
       \param addr Address to which the next packet shall be transmitted.
       \returns \ref status_codes
     */
-    int16_t setTransmitPipe(uint8_t* addr);
+    int16_t setTransmitPipe(const uint8_t* addr);
 
     /*!
       \brief Sets address of receive pipes 0 or 1. The address width must be the same as the same
@@ -384,7 +394,7 @@ class nRF24: public PhysicalLayer {
       \param addr Address from which %nRF24 shall receive new packets on the specified pipe.
       \returns \ref status_codes
     */
-    int16_t setReceivePipe(uint8_t pipeNum, uint8_t* addr);
+    int16_t setReceivePipe(uint8_t pipeNum, const uint8_t* addr);
 
     /*!
       \brief Sets address of receive pipes 2 - 5. The first 2 - 4 address bytes for these pipes
@@ -460,19 +470,27 @@ class nRF24: public PhysicalLayer {
 
     /*!
       \brief Dummy encoding configuration method, to ensure PhysicalLayer compatibility.
-      \param sh Ignored.
+      \param encoding Ignored.
       \returns \ref status_codes
     */
     int16_t setEncoding(uint8_t encoding) override;
+    
+    /*!
+      \brief Enable or disable the low-noise amplifier.
+      Improves receive performance at the cost of increased power consumption.
+      \param enable True to enable.
+      \returns \ref status_codes
+    */
+    int16_t setLNA(bool enable);
 
 #if !RADIOLIB_GODMODE && !RADIOLIB_LOW_LEVEL
   protected:
 #endif
-    Module* getMod();
+    Module* getMod() override;
 
     void SPIreadRxPayload(uint8_t* data, uint8_t numBytes);
-    void SPIwriteTxPayload(uint8_t* data, uint8_t numBytes);
-    void SPItransfer(uint8_t cmd, bool write = false, uint8_t* dataOut = NULL, uint8_t* dataIn = NULL, uint8_t numBytes = 0);
+    void SPIwriteTxPayload(const uint8_t* data, uint8_t numBytes);
+    void SPItransfer(uint8_t cmd, bool write = false, const uint8_t* dataOut = NULL, uint8_t* dataIn = NULL, uint8_t numBytes = 0);
 
 #if !RADIOLIB_GODMODE
   private:

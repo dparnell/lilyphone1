@@ -1,0 +1,6 @@
+{
+    "name": "Crypto",
+    "version": "0.4.0",
+    "description": "Ed25519, Curve25519, SHA-256/512 and AES from rweather/arduinolibs, trimmed to what MeshCore uses.",
+    "license": "MIT"
+}

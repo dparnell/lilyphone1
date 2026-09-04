@@ -1,0 +1,6 @@
+{
+    "name": "MeshCore",
+    "version": "1.10.0",
+    "description": "MeshCore mesh protocol, trimmed to the core plus the SX1262 radio helper.",
+    "license": "MIT"
+}

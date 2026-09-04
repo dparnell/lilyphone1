@@ -21,7 +21,7 @@ class Si4431: public Si4432 {
       \brief Default constructor.
       \param mod Instance of Module that will be used to communicate with the radio chip.
     */
-    Si4431(Module* mod);
+    Si4431(Module* mod); // cppcheck-suppress noExplicitConstructor
 
     // basic methods
 
@@ -35,7 +35,7 @@ class Si4431: public Si4432 {
       \param preambleLen Preamble Length in bits. Defaults to 16 bits.
       \returns \ref status_codes
     */
-    int16_t begin(float freq = 434.0, float br = 4.8, float freqDev = 5.0, float rxBw = 181.1, int8_t power = 10, uint8_t preambleLen = 16);
+    int16_t begin(float freq = 434.0, float br = 4.8, float freqDev = 5.0, float rxBw = 181.1, int8_t power = 10, uint8_t preambleLen = 16) override;
 
     // configuration methods
 
@@ -44,7 +44,7 @@ class Si4431: public Si4432 {
       \param power Output power to be set in dBm.
       \returns \ref status_codes
     */
-    int16_t setOutputPower(int8_t power);
+    int16_t setOutputPower(int8_t power) override;
 
 #if !RADIOLIB_GODMODE
   protected:

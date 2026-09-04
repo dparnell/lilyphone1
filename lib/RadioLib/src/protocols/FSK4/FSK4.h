@@ -59,7 +59,7 @@ class FSK4Client {
       \param len Number of bytes to transmit.
       \returns Number of transmitted bytes.
     */
-    size_t write(uint8_t* buff, size_t len);
+    size_t write(const uint8_t* buff, size_t len);
 
     /*!
       \brief Transmit a single byte.
@@ -84,9 +84,9 @@ class FSK4Client {
 
     uint32_t baseFreq = 0, baseFreqHz = 0;
     uint32_t shiftFreq = 0, shiftFreqHz = 0;
-    uint32_t bitDuration = 0;
-    uint32_t tones[4];
-    uint32_t tonesHz[4];
+    RadioLibTime_t bitDuration = 0;
+    uint32_t tones[4] = { 0 };
+    uint32_t tonesHz[4] = { 0 };
 
     void tone(uint8_t i);
 

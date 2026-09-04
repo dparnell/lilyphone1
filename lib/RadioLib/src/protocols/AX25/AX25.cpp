@@ -1,5 +1,7 @@
 #include "AX25.h"
+
 #include <string.h>
+
 #if !RADIOLIB_EXCLUDE_AX25
 
 AX25Frame::AX25Frame(const char* destCallsign, uint8_t destSSID, const char* srcCallsign, uint8_t srcSSID, uint8_t control)
@@ -8,11 +10,11 @@ AX25Frame::AX25Frame(const char* destCallsign, uint8_t destSSID, const char* src
 }
 
 AX25Frame::AX25Frame(const char* destCallsign, uint8_t destSSID, const char* srcCallsign, uint8_t srcSSID, uint8_t control, uint8_t protocolID, const char* info)
-  : AX25Frame(destCallsign, destSSID, srcCallsign, srcSSID, control, protocolID, (uint8_t*)info, strlen(info)) {
+  : AX25Frame(destCallsign, destSSID, srcCallsign, srcSSID, control, protocolID, reinterpret_cast<uint8_t*>(const_cast<char*>(info)), strlen(info)) {
 
 }
 
-AX25Frame::AX25Frame(const char* destCallsign, uint8_t destSSID, const char* srcCallsign, uint8_t srcSSID, uint8_t control, uint8_t protocolID, uint8_t* info, uint16_t infoLen) {
+AX25Frame::AX25Frame(const char* destCallsign, uint8_t destSSID, const char* srcCallsign, uint8_t srcSSID, uint8_t control, uint8_t protocolID, const uint8_t* info, uint16_t infoLen) {
   // destination callsign/SSID
   memcpy(this->destCallsign, destCallsign, strlen(destCallsign));
   this->destCallsign[strlen(destCallsign)] = '\0';
@@ -50,8 +52,41 @@ AX25Frame::AX25Frame(const char* destCallsign, uint8_t destSSID, const char* src
   }
 }
 
-AX25Frame::AX25Frame(const AX25Frame& frame) {
-  *this = frame;
+AX25Frame::AX25Frame(const AX25Frame& frame)
+  : destSSID(frame.destSSID),
+    srcSSID(frame.srcSSID), 
+    numRepeaters(frame.numRepeaters),
+    control(frame.control),
+    protocolID(frame.protocolID),
+    infoLen(frame.infoLen),
+    rcvSeqNumber(frame.rcvSeqNumber),
+    sendSeqNumber(frame.sendSeqNumber) {
+  strncpy(this->destCallsign, frame.destCallsign, RADIOLIB_AX25_MAX_CALLSIGN_LEN + 1);
+  strncpy(this->srcCallsign, frame.srcCallsign, RADIOLIB_AX25_MAX_CALLSIGN_LEN + 1);
+
+  if(frame.infoLen) {
+    #if !RADIOLIB_STATIC_ONLY
+      this->info = new uint8_t[frame.infoLen];
+    #endif
+    memcpy(this->info, frame.info, frame.infoLen);
+  }
+
+  if(frame.numRepeaters) {
+    #if !RADIOLIB_STATIC_ONLY
+      this->repeaterCallsigns = new char*[frame.numRepeaters];
+      for(uint8_t i = 0; i < frame.numRepeaters; i++) {
+        this->repeaterCallsigns[i] = new char[strlen(frame.repeaterCallsigns[i]) + 1];
+      }
+      this->repeaterSSIDs = new uint8_t[frame.numRepeaters];
+    #endif
+
+    this->numRepeaters = frame.numRepeaters;
+    for(uint8_t i = 0; i < frame.numRepeaters; i++) {
+      memcpy(this->repeaterCallsigns[i], frame.repeaterCallsigns[i], strlen(frame.repeaterCallsigns[i]));
+      this->repeaterCallsigns[i][strlen(frame.repeaterCallsigns[i])] = '\0';
+    }
+    memcpy(this->repeaterSSIDs, frame.repeaterSSIDs, frame.numRepeaters);
+  }
 }
 
 AX25Frame::~AX25Frame() {
@@ -107,7 +142,7 @@ AX25Frame& AX25Frame::operator=(const AX25Frame& frame) {
   return(*this);
 }
 
-int16_t AX25Frame::setRepeaters(char** repeaterCallsigns, uint8_t* repeaterSSIDs, uint8_t numRepeaters) {
+int16_t AX25Frame::setRepeaters(char** repeaterCallsigns, const uint8_t* repeaterSSIDs, uint8_t numRepeaters) {
   // check number of repeaters
   if((numRepeaters < 1) || (numRepeaters > 8)) {
     return(RADIOLIB_ERR_INVALID_NUM_REPEATERS);
@@ -154,15 +189,46 @@ void AX25Frame::setSendSequence(uint8_t seqNumber) {
 AX25Client::AX25Client(PhysicalLayer* phy) {
   phyLayer = phy;
   #if !RADIOLIB_EXCLUDE_AFSK
+  audio = nullptr;
   bellModem = nullptr;
   #endif
 }
 
 #if !RADIOLIB_EXCLUDE_AFSK
-AX25Client::AX25Client(AFSKClient* audio) {
-  phyLayer = audio->phyLayer;
-  bellModem = new BellClient(audio);
+AX25Client::AX25Client(AFSKClient* aud)
+  : audio(aud) {
+  phyLayer = this->audio->phyLayer;
+  bellModem = new BellClient(this->audio);
   bellModem->setModem(Bell202);
+}
+
+AX25Client::AX25Client(const AX25Client& ax25)
+  : phyLayer(ax25.phyLayer),
+    sourceSSID(ax25.sourceSSID),
+    preambleLen(ax25.preambleLen) {
+  strncpy(sourceCallsign, ax25.sourceCallsign, RADIOLIB_AX25_MAX_CALLSIGN_LEN + 1);
+  #if !RADIOLIB_EXCLUDE_AFSK
+  if(ax25.bellModem) {
+    this->audio = ax25.audio;
+    this->bellModem = new BellClient(ax25.audio);
+  }
+  #endif
+}
+
+AX25Client& AX25Client::operator=(const AX25Client& ax25) {
+  if(&ax25 != this) {
+    this->phyLayer = ax25.phyLayer;
+    this->sourceSSID = ax25.sourceSSID;
+    this->preambleLen = ax25.preambleLen;
+    strncpy(sourceCallsign, ax25.sourceCallsign, RADIOLIB_AX25_MAX_CALLSIGN_LEN + 1);
+    #if !RADIOLIB_EXCLUDE_AFSK
+    if(ax25.bellModem) {
+      this->audio = ax25.audio;
+      this->bellModem = new BellClient(ax25.audio);
+    }
+    #endif
+  }
+  return(*this);
 }
 
 int16_t AX25Client::setCorrection(int16_t mark, int16_t space, float length) {
@@ -194,12 +260,7 @@ int16_t AX25Client::begin(const char* srcCallsign, uint8_t srcSSID, uint8_t preL
   preambleLen = preLen;
 
   // configure for direct mode
-  #if !RADIOLIB_EXCLUDE_AFSK
-  if(bellModem != nullptr) {
-    return(phyLayer->startDirect());
-  }
-  #endif
-  return(RADIOLIB_ERR_NONE);
+  return(phyLayer->startDirect());
 }
 
 #if defined(RADIOLIB_BUILD_ARDUINO)
@@ -210,10 +271,12 @@ int16_t AX25Client::transmit(String& str, const char* destCallsign, uint8_t dest
 
 int16_t AX25Client::transmit(const char* str, const char* destCallsign, uint8_t destSSID) {
   // create control field
-  uint8_t controlField = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
+  uint8_t controlField = RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
 
   // build the frame
-  AX25Frame frame(destCallsign, destSSID, sourceCallsign, sourceSSID, controlField, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)str, strlen(str));
+  AX25Frame frame(destCallsign, destSSID, sourceCallsign, sourceSSID, controlField,
+                  RADIOLIB_AX25_PID_NO_LAYER_3,
+                  reinterpret_cast<uint8_t*>(const_cast<char*>(str)), strlen(str));
 
   // send Unnumbered Information frame
   return(sendFrame(&frame));
@@ -308,7 +371,7 @@ int16_t AX25Client::sendFrame(AX25Frame* frame) {
 
   // flip bit order
   for(size_t i = 0; i < frameBuffLen; i++) {
-    frameBuff[i] = Module::reflect(frameBuff[i], 8);
+    frameBuff[i] = rlb_reflect(frameBuff[i], 8);
   }
 
   // calculate
@@ -341,7 +404,7 @@ int16_t AX25Client::sendFrame(AX25Frame* frame) {
       uint16_t stuffedFrameBuffPos = stuffedFrameBuffLenBits + 7 - 2*(stuffedFrameBuffLenBits%8);
       if((frameBuff[i] >> shift) & 0x01) {
         // copy 1 and increment counter
-        SET_BIT_IN_ARRAY(stuffedFrameBuff, stuffedFrameBuffPos);
+        SET_BIT_IN_ARRAY_MSB(stuffedFrameBuff, stuffedFrameBuffPos);
         stuffedFrameBuffLenBits++;
         count++;
 
@@ -351,14 +414,14 @@ int16_t AX25Client::sendFrame(AX25Frame* frame) {
           stuffedFrameBuffPos = stuffedFrameBuffLenBits + 7 - 2*(stuffedFrameBuffLenBits%8);
 
           // insert 0 and reset counter
-          CLEAR_BIT_IN_ARRAY(stuffedFrameBuff, stuffedFrameBuffPos);
+          CLEAR_BIT_IN_ARRAY_MSB(stuffedFrameBuff, stuffedFrameBuffPos);
           stuffedFrameBuffLenBits++;
           count = 0;
         }
 
       } else {
         // copy 0 and reset counter
-        CLEAR_BIT_IN_ARRAY(stuffedFrameBuff, stuffedFrameBuffPos);
+        CLEAR_BIT_IN_ARRAY_MSB(stuffedFrameBuff, stuffedFrameBuffPos);
         stuffedFrameBuffLenBits++;
         count = 0;
       }
@@ -393,20 +456,20 @@ int16_t AX25Client::sendFrame(AX25Frame* frame) {
   for(size_t i = preambleLen + 1; i < stuffedFrameBuffLen*8; i++) {
     size_t currBitPos = i + 7 - 2*(i%8);
     size_t prevBitPos = (i - 1) + 7 - 2*((i - 1)%8);
-    if(TEST_BIT_IN_ARRAY(stuffedFrameBuff, currBitPos)) {
+    if(TEST_BIT_IN_ARRAY_MSB(stuffedFrameBuff, currBitPos)) {
       // bit is 1, no change, copy previous bit
-      if(TEST_BIT_IN_ARRAY(stuffedFrameBuff, prevBitPos)) {
-        SET_BIT_IN_ARRAY(stuffedFrameBuff, currBitPos);
+      if(TEST_BIT_IN_ARRAY_MSB(stuffedFrameBuff, prevBitPos)) {
+        SET_BIT_IN_ARRAY_MSB(stuffedFrameBuff, currBitPos);
       } else {
-        CLEAR_BIT_IN_ARRAY(stuffedFrameBuff, currBitPos);
+        CLEAR_BIT_IN_ARRAY_MSB(stuffedFrameBuff, currBitPos);
       }
 
     } else {
       // bit is 0, transition, copy inversion of the previous bit
-      if(TEST_BIT_IN_ARRAY(stuffedFrameBuff, prevBitPos)) {
-        CLEAR_BIT_IN_ARRAY(stuffedFrameBuff, currBitPos);
+      if(TEST_BIT_IN_ARRAY_MSB(stuffedFrameBuff, prevBitPos)) {
+        CLEAR_BIT_IN_ARRAY_MSB(stuffedFrameBuff, currBitPos);
       } else {
-        SET_BIT_IN_ARRAY(stuffedFrameBuff, currBitPos);
+        SET_BIT_IN_ARRAY_MSB(stuffedFrameBuff, currBitPos);
       }
     }
   }
@@ -440,7 +503,7 @@ int16_t AX25Client::sendFrame(AX25Frame* frame) {
 }
 
 void AX25Client::getCallsign(char* buff) {
-  strncpy(buff, sourceCallsign, RADIOLIB_AX25_MAX_CALLSIGN_LEN);
+  strncpy(buff, sourceCallsign, RADIOLIB_AX25_MAX_CALLSIGN_LEN + 1);
 }
 
 uint8_t AX25Client::getSSID() {

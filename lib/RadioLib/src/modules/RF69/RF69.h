@@ -12,7 +12,7 @@
 // RF69 physical layer properties
 #define RADIOLIB_RF69_FREQUENCY_STEP_SIZE                       61.03515625
 #define RADIOLIB_RF69_MAX_PACKET_LENGTH                         64
-#define RADIOLIB_RF69_CRYSTAL_FREQ                              32.0
+#define RADIOLIB_RF69_CRYSTAL_FREQ                              32.0f
 #define RADIOLIB_RF69_DIV_EXPONENT                              19
 
 // RF69 register map
@@ -486,9 +486,9 @@ class RF69: public PhysicalLayer {
 
     /*!
       \brief Default constructor.
-      \param mod Instance of Module that will be used to communicate with the radio.
+      \param module Instance of Module that will be used to communicate with the radio.
     */
-    RF69(Module* module);
+    RF69(Module* module); // cppcheck-suppress noExplicitConstructor
 
     // basic methods
 
@@ -523,22 +523,24 @@ class RF69: public PhysicalLayer {
       \param addr Address to send the data to. Will only be added if address filtering was enabled.
       \returns \ref status_codes
     */
-    int16_t transmit(uint8_t* data, size_t len, uint8_t addr = 0) override;
+    int16_t transmit(const uint8_t* data, size_t len, uint8_t addr = 0) override;
 
     /*!
       \brief Blocking binary receive method.
       Overloads for string-based transmissions are implemented in PhysicalLayer.
-      \param data Binary data to be sent.
-      \param len Number of bytes to send.
+      \param data Pointer to array to save the received binary data.
+      \param len Number of bytes that will be received. Must be known in advance for binary transmissions.
+      \param timeout Reception timeout in milliseconds. If set to 0,
+      timeout period will be calculated automatically based on the radio configuration.
       \returns \ref status_codes
     */
-    int16_t receive(uint8_t* data, size_t len) override;
+    int16_t receive(uint8_t* data, size_t len, RadioLibTime_t timeout = 0) override;
 
     /*!
       \brief Sets the module to sleep mode.
       \returns \ref status_codes
     */
-    int16_t sleep();
+    int16_t sleep() override;
 
     /*!
       \brief Sets the module to standby mode.
@@ -575,9 +577,9 @@ class RF69: public PhysicalLayer {
 
     /*!
       \brief Sets AES key.
-      \param Key to be used for AES encryption. Must be exactly 16 bytes long.
+      \param key Key to be used for AES encryption. Must be exactly 16 bytes long.
     */
-    void setAESKey(uint8_t* key);
+    void setAESKey(const uint8_t* key);
 
     /*!
       \brief Enables AES encryption.
@@ -619,23 +621,23 @@ class RF69: public PhysicalLayer {
       \brief Sets interrupt service routine to call when a packet is received.
       \param func ISR to call.
     */
-    void setPacketReceivedAction(void (*func)(void));
+    void setPacketReceivedAction(void (*func)(void)) override;
 
     /*!
       \brief Clears interrupt service routine to call when a packet is received.
     */
-    void clearPacketReceivedAction();
+    void clearPacketReceivedAction() override;
 
     /*!
       \brief Sets interrupt service routine to call when a packet is sent.
       \param func ISR to call.
     */
-    void setPacketSentAction(void (*func)(void));
+    void setPacketSentAction(void (*func)(void)) override;
 
     /*!
       \brief Clears interrupt service routine to call when a packet is sent.
     */
-    void clearPacketSentAction();
+    void clearPacketSentAction() override;
 
     /*!
       \brief Set interrupt service routine function to call when FIFO is empty.
@@ -647,6 +649,14 @@ class RF69: public PhysicalLayer {
       \brief Clears interrupt service routine to call when  FIFO is empty.
     */
     void clearFifoEmptyAction();
+
+    /*!
+      \brief Set FIFO threshold level.
+      Be aware that threshold is also set in setFifoFullAction method.
+      setFifoThreshold method must be called AFTER calling setFifoFullAction!
+      \param threshold Threshold level in bytes.
+    */
+    void setFifoThreshold(uint8_t threshold);
 
     /*!
       \brief Set interrupt service routine function to call when FIFO is full.
@@ -685,7 +695,7 @@ class RF69: public PhysicalLayer {
       \param addr Address to send the data to. Will only be added if address filtering was enabled.
       \returns \ref status_codes
     */
-    int16_t startTransmit(uint8_t* data, size_t len, uint8_t addr = 0) override;
+    int16_t startTransmit(const uint8_t* data, size_t len, uint8_t addr = 0) override;
 
     /*!
       \brief Clean up after transmission is done.
@@ -697,7 +707,7 @@ class RF69: public PhysicalLayer {
       \brief Interrupt-driven receive method. GDO0 will be activated when full packet is received.
       \returns \ref status_codes
     */
-    int16_t startReceive();
+    int16_t startReceive() override;
 
     /*!
       \brief Interrupt-driven receive method, implemented for compatibility with PhysicalLayer.
@@ -707,7 +717,7 @@ class RF69: public PhysicalLayer {
       \param len Ignored.
       \returns \ref status_codes
     */
-    int16_t startReceive(uint32_t timeout, uint16_t irqFlags, uint16_t irqMask, size_t len);
+    int16_t startReceive(uint32_t timeout, uint32_t irqFlags, uint32_t irqMask, size_t len) override;
 
     /*!
       \brief Reads data received after calling startReceive method. When the packet length is not known in advance,
@@ -719,6 +729,12 @@ class RF69: public PhysicalLayer {
     */
     int16_t readData(uint8_t* data, size_t len) override;
 
+    /*!
+      \brief Clean up after reception is done.
+      \returns \ref status_codes
+    */
+    int16_t finishReceive() override;
+
     // configuration methods
 
     /*!
@@ -727,7 +743,7 @@ class RF69: public PhysicalLayer {
       \param freq Carrier frequency to be set in MHz.
       \returns \ref status_codes
     */
-    int16_t setFrequency(float freq);
+    int16_t setFrequency(float freq) override;
 
     /*!
       \brief Gets carrier frequency.
@@ -741,7 +757,7 @@ class RF69: public PhysicalLayer {
       \param br Bit rate to be set in kbps.
       \returns \ref status_codes
     */
-    int16_t setBitRate(float br);
+    int16_t setBitRate(float br) override;
 
     /*!
       \brief Sets receiver bandwidth. Allowed values are 2.6, 3.1, 3.9, 5.2, 6.3, 7.8, 10.4, 12.5, 15.6,
@@ -781,14 +797,14 @@ class RF69: public PhysicalLayer {
       \param len Sync word length in bytes.
       \param maxErrBits Maximum allowed number of bit errors in received sync word. Defaults to 0.
     */
-    int16_t setSyncWord(uint8_t* syncWord, size_t len, uint8_t maxErrBits = 0);
+    int16_t setSyncWord(const uint8_t* syncWord, size_t len, uint8_t maxErrBits = 0);
 
     /*!
       \brief Sets preamble length.
       \param preambleLen Preamble length to be set (in bits), allowed values: 16, 24, 32, 48, 64, 96, 128 and 192.
       \returns \ref status_codes
     */
-    int16_t setPreambleLength(uint8_t preambleLen);
+    int16_t setPreambleLength(size_t preambleLen) override;
 
     /*!
       \brief Sets node address. Calling this method will also enable address filtering for node address only.
@@ -872,14 +888,14 @@ class RF69: public PhysicalLayer {
 
      /*!
       \brief Set modem in variable packet length mode.
-      \param len Maximum packet length.
+      \param maxLen Maximum packet length.
       \returns \ref status_codes
     */
     int16_t variablePacketLengthMode(uint8_t maxLen = RADIOLIB_RF69_MAX_PACKET_LENGTH);
 
      /*!
       \brief Enable sync word filtering and generation.
-      \param numBits Sync word length in bits.
+      \param maxErrBits Maximum allowed number of error bits in sync word.
       \returns \ref status_codes
     */
     int16_t enableSyncWordFiltering(uint8_t maxErrBits = 0);
@@ -944,7 +960,7 @@ class RF69: public PhysicalLayer {
       \brief Gets RSSI (Recorded Signal Strength Indicator) of the last received packet.
       \returns Last packet RSSI in dBm.
     */
-    float getRSSI();
+    float getRSSI() override;
 
     /*!
       \brief Sets the RSSI value above which the RSSI interrupt is signaled
@@ -963,7 +979,7 @@ class RF69: public PhysicalLayer {
       \brief Get one truly random byte from RSSI noise.
       \returns TRNG byte.
    */
-    uint8_t randomByte();
+    uint8_t randomByte() override;
 
     /*!
       \brief Read version SPI register. Should return RF69_CHIP_VERSION (0x24) if SX127x is connected and working.
@@ -976,13 +992,13 @@ class RF69: public PhysicalLayer {
       \brief Set interrupt service routine function to call when data bit is received in direct mode.
       \param func Pointer to interrupt service routine.
     */
-    void setDirectAction(void (*func)(void));
+    void setDirectAction(void (*func)(void)) override;
 
     /*!
       \brief Function to read and process data bit in direct reception mode.
       \param pin Pin on which to read.
     */
-    void readBit(uint32_t pin);
+    void readBit(uint32_t pin) override;
     #endif
 
     /*!
@@ -996,7 +1012,7 @@ class RF69: public PhysicalLayer {
 #if !RADIOLIB_GODMODE && !RADIOLIB_LOW_LEVEL
   protected:
 #endif
-    Module* getMod();
+    Module* getMod() override;
 
 #if !RADIOLIB_GODMODE
   protected:
@@ -1022,8 +1038,6 @@ class RF69: public PhysicalLayer {
     uint8_t packetLengthConfig = RADIOLIB_RF69_PACKET_FORMAT_VARIABLE;
 
     bool promiscuous = false;
-
-    uint8_t syncWordLength = RADIOLIB_RF69_DEFAULT_SW_LEN;
 
     bool bitSync = true;
 

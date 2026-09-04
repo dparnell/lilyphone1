@@ -17,27 +17,30 @@ int16_t SX1231::begin(float freq, float br, float freqDev, float rxBw, int8_t po
   bool flagFound = false;
   while((i < 10) && !flagFound) {
     int16_t version = getChipVersion();
-    if((version == RADIOLIB_SX123X_CHIP_REVISION_2_A) || (version == RADIOLIB_SX123X_CHIP_REVISION_2_B) || (version == RADIOLIB_SX123X_CHIP_REVISION_2_C)) {
+    if((version == RADIOLIB_SX123X_CHIP_REVISION_2_A) ||
+       (version == RADIOLIB_SX123X_CHIP_REVISION_2_B) ||
+       (version == RADIOLIB_SX123X_CHIP_REVISION_2_C) ||
+       (version == RADIOLIB_SX123X_CHIP_REVISION_2_D)) {
       flagFound = true;
       this->chipRevision = version;
     } else {
-      RADIOLIB_DEBUG_PRINTLN("SX1231 not found! (%d of 10 tries) RF69_REG_VERSION == 0x%04X, expected 0x0021 / 0x0022 / 0x0023", i + 1, version);
+      RADIOLIB_DEBUG_BASIC_PRINTLN("SX1231 not found! (%d of 10 tries) RF69_REG_VERSION == 0x%04X, expected 0x0021 / 0x0022 / 0x0023", i + 1, version);
       mod->hal->delay(10);
       i++;
     }
   }
 
   if(!flagFound) {
-    RADIOLIB_DEBUG_PRINTLN("No SX1231 found!");
+    RADIOLIB_DEBUG_BASIC_PRINTLN("No SX1231 found!");
     mod->term();
     return(RADIOLIB_ERR_CHIP_NOT_FOUND);
   }
-  RADIOLIB_DEBUG_PRINTLN("M\tSX1231");
+  RADIOLIB_DEBUG_BASIC_PRINTLN("M\tSX1231");
 
   // configure settings not accessible by API
   int16_t state = config();
   RADIOLIB_ASSERT(state);
-  RADIOLIB_DEBUG_PRINTLN("M\tRF69");
+  RADIOLIB_DEBUG_BASIC_PRINTLN("M\tRF69");
 
   // configure publicly accessible settings
   state = setFrequency(freq);

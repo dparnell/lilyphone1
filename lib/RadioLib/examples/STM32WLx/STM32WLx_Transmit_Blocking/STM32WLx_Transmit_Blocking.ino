@@ -35,7 +35,7 @@ STM32WLx radio = new STM32WLx_Module();
 //       Some boards may not have either LP or HP.
 //       For those, do not set the LP/HP entry in the table.
 static const uint32_t rfswitch_pins[] =
-                         {PC3,  PC4,  PC5};
+                         {PC3,  PC4,  PC5, RADIOLIB_NC, RADIOLIB_NC};
 static const Module::RfSwitchMode_t rfswitch_table[] = {
   {STM32WLx::MODE_IDLE,  {LOW,  LOW,  LOW}},
   {STM32WLx::MODE_RX,    {HIGH, HIGH, LOW}},
@@ -59,7 +59,7 @@ void setup() {
   } else {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true);
+    while (true) { delay(10); }
   }
 
   // set appropriate TCXO voltage for Nucleo WL55JC1
@@ -69,7 +69,7 @@ void setup() {
   } else {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true);
+    while (true) { delay(10); }
   }
 }
 
@@ -93,11 +93,6 @@ void loop() {
   if (state == RADIOLIB_ERR_NONE) {
     // the packet was successfully transmitted
     Serial.println(F("success!"));
-
-    // print measured data rate
-    Serial.print(F("[STM32WL] Datarate:\t"));
-    Serial.print(radio.getDataRate());
-    Serial.println(F(" bps"));
 
   } else if (state == RADIOLIB_ERR_PACKET_TOO_LONG) {
     // the supplied packet was longer than 256 bytes

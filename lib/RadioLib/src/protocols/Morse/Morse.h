@@ -14,6 +14,7 @@
 #define RADIOLIB_MORSE_INTER_SYMBOL                             0x00
 #define RADIOLIB_MORSE_CHAR_COMPLETE                            0x01
 #define RADIOLIB_MORSE_WORD_COMPLETE                            0x02
+#define RADIOLIB_MORSE_UNKNOWN_SYMBOL                           '*'
 
 // Morse character table: - using codes defined in ITU-R M.1677-1
 //                        - Morse code representation is saved LSb first, using additional bit as guard
@@ -148,7 +149,7 @@ class MorseClient: public RadioLibPrint {
       \param b Byte to write.
       \returns 1 if the byte was written, 0 otherwise.
     */
-    size_t write(uint8_t b);
+    size_t write(uint8_t b) override;
 
 #if !RADIOLIB_GODMODE
   private:
@@ -167,12 +168,9 @@ class MorseClient: public RadioLibPrint {
 
     // variables to keep decoding state
     uint32_t signalCounter = 0;
-    uint32_t signalStart = 0;
+    RadioLibTime_t signalStart = 0;
     uint32_t pauseCounter = 0;
-    uint32_t pauseStart = 0;
-
-    size_t printNumber(unsigned long, uint8_t);
-    size_t printFloat(double, uint8_t);
+    RadioLibTime_t pauseStart = 0;
 
     int16_t transmitDirect(uint32_t freq = 0, uint32_t freqHz = 0);
     int16_t standby();

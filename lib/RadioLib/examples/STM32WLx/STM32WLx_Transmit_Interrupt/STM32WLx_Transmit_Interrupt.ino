@@ -26,7 +26,7 @@ STM32WLx radio = new STM32WLx_Module();
 //       Some boards may not have either LP or HP.
 //       For those, do not set the LP/HP entry in the table.
 static const uint32_t rfswitch_pins[] =
-                         {PC3,  PC4,  PC5};
+                         {PC3,  PC4,  PC5, RADIOLIB_NC, RADIOLIB_NC};
 static const Module::RfSwitchMode_t rfswitch_table[] = {
   {STM32WLx::MODE_IDLE,  {LOW,  LOW,  LOW}},
   {STM32WLx::MODE_RX,    {HIGH, HIGH, LOW}},
@@ -37,6 +37,18 @@ static const Module::RfSwitchMode_t rfswitch_table[] = {
 
 // save transmission state between loops
 int transmissionState = RADIOLIB_ERR_NONE;
+
+// flag to indicate that a packet was sent
+volatile bool transmittedFlag = false;
+
+// this function is called when a complete packet
+// is transmitted by the module
+// IMPORTANT: this function MUST be 'void' type
+//            and MUST NOT have any arguments!
+void setFlag(void) {
+  // we sent a packet, set the flag
+  transmittedFlag = true;
+}
 
 void setup() {
   Serial.begin(9600);
@@ -53,7 +65,7 @@ void setup() {
   } else {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true);
+    while (true) { delay(10); }
   }
 
   // set appropriate TCXO voltage for Nucleo WL55JC1
@@ -63,7 +75,7 @@ void setup() {
   } else {
     Serial.print(F("failed, code "));
     Serial.println(state);
-    while (true);
+    while (true) { delay(10); }
   }
 
   // set the function that will be called
@@ -85,18 +97,6 @@ void setup() {
   */
 }
 
-// flag to indicate that a packet was sent
-volatile bool transmittedFlag = false;
-
-// this function is called when a complete packet
-// is transmitted by the module
-// IMPORTANT: this function MUST be 'void' type
-//            and MUST NOT have any arguments!
-void setFlag(void) {
-  // we sent a packet, set the flag
-  transmittedFlag = true;
-}
-
 // counter to keep track of transmitted packets
 int count = 0;
 
@@ -109,10 +109,6 @@ void loop() {
     if (transmissionState == RADIOLIB_ERR_NONE) {
       // packet was successfully sent
       Serial.println(F("transmission finished!"));
-
-      // NOTE: when using interrupt-driven transmit method,
-      //       it is not possible to automatically measure
-      //       transmission data rate using getDataRate()
 
     } else {
       Serial.print(F("failed, code "));

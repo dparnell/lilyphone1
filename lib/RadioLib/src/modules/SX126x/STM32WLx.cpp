@@ -45,7 +45,7 @@ int16_t STM32WLx::setOutputPower(int8_t power) {
   RADIOLIB_ASSERT(state);
 
   // check the user did not request power output that is not possible
-  Module* mod = this->getMod();
+  const Module* mod = this->getMod();
   bool hp_supported = mod->findRfSwitchMode(MODE_TX_HP);
   bool lp_supported = mod->findRfSwitchMode(MODE_TX_LP);
   if((!lp_supported && (power < -9)) || (!hp_supported && (power > 14))) {
@@ -87,14 +87,14 @@ int16_t STM32WLx::setOutputPower(int8_t power) {
     return(RADIOLIB_ERR_INVALID_OUTPUT_POWER);
 
   }
+  RADIOLIB_ASSERT(state);
 
   // Apply workaround for HP only
   state = SX126x::fixPaClamping(use_hp);
   RADIOLIB_ASSERT(state);
 
-  // set output power
-  /// \todo power ramp time configuration
-  state = SX126x::setTxParams(power);
+  // set output power with default 200us ramp
+  state = SX126x::setTxParams(power, RADIOLIB_SX126X_PA_RAMP_200U);
   RADIOLIB_ASSERT(state);
 
   // restore OCP configuration

@@ -12,6 +12,7 @@
 #include "phone_store.h"
 #include "system_clock.h"
 #include "udp_relay.h"
+#include "mesh_net.h"
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 
@@ -507,7 +508,6 @@ void setup() {
   // init peripheral
   touch.setPins(BOARD_TOUCH_RST, BOARD_TOUCH_INT);
   peri_init_st[E_PERI_INK_SCREEN] = ink_screen_init();
-  peri_init_st[E_PERI_LORA]       = lora_init();
   peri_init_st[E_PERI_TOUCH]      = touch.begin(Wire, BOARD_I2C_ADDR_TOUCH, BOARD_TOUCH_SDA, BOARD_TOUCH_SCL);
   peri_init_st[E_PERI_KYEPAD]     = keypad_init(BOARD_I2C_ADDR_KEYBOARD);
   peri_init_st[E_PERI_BQ25896]    = bq25896_init();
@@ -523,6 +523,9 @@ void setup() {
 
   phone_store_init();
   udp_relay_init();
+
+  // After the SPI bus is up, and after the display: the mesh shares the bus.
+  peri_init_st[E_PERI_LORA] = mesh_net_init();
 
   lvgl_init();
 

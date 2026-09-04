@@ -21,22 +21,22 @@ HellClient::HellClient(AFSKClient* audio) {
 int16_t HellClient::begin(float base, float rate) {
   // calculate 24-bit frequency
   baseFreqHz = base;
-  baseFreq = (base * 1000000.0) / phyLayer->getFreqStep();
+  baseFreq = (base * 1000000.0f) / phyLayer->freqStep;
 
   // calculate "pixel" duration
-  pixelDuration = 1000000.0/rate;
+  pixelDuration = 1000000.0f/rate;
 
   // configure for direct mode
   return(phyLayer->startDirect());
 }
 
-size_t HellClient::printGlyph(uint8_t* buff) {
+size_t HellClient::printGlyph(const uint8_t* buff) {
   // print the character
   Module* mod = phyLayer->getMod();
   bool transmitting = false;
   for(uint8_t mask = 0x40; mask >= 0x01; mask >>= 1) {
     for(int8_t i = RADIOLIB_HELL_FONT_HEIGHT - 1; i >= 0; i--) {
-        uint32_t start = mod->hal->micros();
+        RadioLibTime_t start = mod->hal->micros();
         if((buff[i] & mask) && (!transmitting)) {
           transmitting = true;
           transmitDirect(baseFreq, baseFreqHz);
@@ -73,7 +73,8 @@ size_t HellClient::write(uint8_t b) {
   uint8_t buff[RADIOLIB_HELL_FONT_WIDTH];
   buff[0] = 0x00;
   for(uint8_t i = 0; i < RADIOLIB_HELL_FONT_WIDTH - 2; i++) {
-    buff[i + 1] = RADIOLIB_NONVOLATILE_READ_BYTE(&HellFont[pos][i]);
+    uint8_t* ptr = const_cast<uint8_t*>(&HellFont[pos][i]);
+    buff[i + 1] = RADIOLIB_NONVOLATILE_READ_BYTE(ptr);
   }
   buff[RADIOLIB_HELL_FONT_WIDTH - 1] = 0x00;
 

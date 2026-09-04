@@ -11,6 +11,7 @@
 #define RADIOLIB_SX123X_CHIP_REVISION_2_A                       0x21
 #define RADIOLIB_SX123X_CHIP_REVISION_2_B                       0x22
 #define RADIOLIB_SX123X_CHIP_REVISION_2_C                       0x23
+#define RADIOLIB_SX123X_CHIP_REVISION_2_D                       0x24
 
 // RADIOLIB_SX1231 specific register map
 #define RADIOLIB_SX1231_REG_TEST_OOK                            0x6E
@@ -96,7 +97,7 @@ class SX1231: public RF69  {
       \brief Default constructor.
       \param mod Instance of Module that will be used to communicate with the radio.
     */
-    SX1231(Module* mod);
+    SX1231(Module* mod); // cppcheck-suppress noExplicitConstructor
 
     /*!
       \brief Initialization method.
@@ -108,10 +109,10 @@ class SX1231: public RF69  {
       \param preambleLen Preamble Length in bits. Defaults to 16 bits.
       \returns \ref status_codes
     */
-    int16_t begin(float freq = 434.0, float br = 4.8, float freqDev = 5.0, float rxBw = 125.0, int8_t power = 10, uint8_t preambleLen = 16);
+    virtual int16_t begin(float freq = 434.0, float br = 4.8, float freqDev = 5.0, float rxBw = 125.0, int8_t power = 10, uint8_t preambleLen = 16);
 
 #if !RADIOLIB_GODMODE
-  private:
+  protected:
 #endif
     uint8_t chipRevision = 0;
 };

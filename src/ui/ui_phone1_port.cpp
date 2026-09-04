@@ -47,36 +47,6 @@ void ui_disp_hibernate(void)
     disp_hibernate_now();
 }
 //************************************[ screen 0 ]****************************************** menu
-//************************************[ screen 1 ]****************************************** lora
-
-float ui_lora_get_freq(void)
-{
-    return LORA_FREQ;
-}
-int ui_lora_get_mode(void)
-{
-    return lora_get_mode();
-}
-void ui_lora_set_mode(int mode)
-{
-    lora_set_mode(mode);
-}
-void ui_lora_send(const char *str)
-{
-    lora_transmit(str);
-}
-void ui_lora_recv_loop(void)
-{
-    lora_receive_loop();
-}
-bool ui_lora_get_recv(const char **str, int *rssi)
-{
-    return lora_get_recv(str, rssi);
-}
-void ui_lora_set_recv_flag(void)
-{
-    lora_set_recv_flag();
-}
 //************************************[ screen 2 ]****************************************** setting
 #if 1
 // set function
