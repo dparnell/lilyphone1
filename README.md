@@ -53,6 +53,25 @@ Swipe up to unlock. A call still comes through.
 arrives first, with the local time zone taken from the network or chosen by hand
 from a searchable list of 461.
 
+**Hotspot.** The phone can become a WiFi access point that relays a UDP tunnel
+out over mobile data, so a laptop with no other connection can reach the
+internet through a WireGuard peer. Configure the endpoint, port, APN and access
+point details on the Hotspot screen, join the network, and point the client's
+tunnel at the phone on the same port.
+
+Two things to know before relying on it:
+
+- **It is a relay to one configured endpoint, not a router.** The Arduino core's
+  lwIP is built with `CONFIG_LWIP_IP_FORWARD` off, so a packet addressed to any
+  other host is discarded before this firmware could see it. A tunnel has
+  exactly one endpoint, so this is enough for WireGuard - but it will not serve
+  as a general gateway.
+- **It is slow.** Every datagram crosses to the modem over a 115200 baud serial
+  link wrapped in AT commands, which puts the ceiling somewhere near 50 kbit/s
+  with tens of milliseconds of latency per packet. It is a usable control
+  channel, not a usable internet connection. Set a small MTU on the tunnel;
+  anything over 1472 bytes is dropped rather than fragmented.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 

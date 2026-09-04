@@ -11,6 +11,7 @@
 #include "modem_service.h"
 #include "phone_store.h"
 #include "system_clock.h"
+#include "udp_relay.h"
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 
@@ -521,6 +522,7 @@ void setup() {
   peri_init_st[E_PERI_A7682E]     = A7682E_init();
 
   phone_store_init();
+  udp_relay_init();
 
   lvgl_init();
 

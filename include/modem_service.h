@@ -87,6 +87,31 @@ void     modem_get_operator(char *buf, int len);
  * unsupported module simply answers ERROR and nothing happens. */
 void     modem_play_tone(void);
 
+/* --- a single UDP socket over the cellular data context ---
+ *
+ * TinyGSM only ever opens TCP on this modem, so this is done directly with the
+ * A76xx socket commands. Everything runs on the modem task, since that task
+ * owns the serial port; the two queues below are how packets cross over.
+ *
+ * One socket is all that is offered because that is all the relay needs: the
+ * client points its tunnel at this phone, and this phone points at one far end.
+ */
+#define MODEM_UDP_MTU 1472
+
+/* Opens the data context and a UDP socket to `host`:`port`, bound locally to
+ * `local_port`. Returns immediately; watch modem_udp_is_open(). */
+void modem_udp_open(const char *apn, const char *host, uint16_t port, uint16_t local_port);
+void modem_udp_close(void);
+bool modem_udp_is_open(void);
+/* Empty until something has gone wrong, then why. */
+void modem_udp_get_error(char *buf, int len);
+
+/* Queues a datagram to go out. False when the queue is full, which on this
+ * link means the radio is not keeping up with the client. */
+bool modem_udp_send(const uint8_t *data, uint16_t len);
+/* Takes the next datagram that arrived, if any. */
+bool modem_udp_receive(uint8_t *buf, uint16_t buf_len, uint16_t *out_len);
+
 /* Runs a raw AT command on the modem task and logs the reply to the monitor.
  * Used by the screens that poke at modem features directly. */
 void     modem_request_at(const char *cmd);

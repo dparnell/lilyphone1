@@ -54,6 +54,8 @@ enum {
     SCREEN13_2_ID, // compose
     SCREEN14_ID,   // quick settings, pulled down from the top of the menu
     SCREEN15_ID,   // lock screen
+    SCREEN16_ID,   // hotspot: wifi access point relaying UDP over cellular
+    SCREEN16_1_ID, // one hotspot setting at a time
 };
 
 /* Why the contacts list was opened. When it is a pick the list hands a number

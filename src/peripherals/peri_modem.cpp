@@ -81,6 +81,9 @@ static int pending_sms_num = 0;
  * acted on from the URC handler, which may be running mid-command. */
 static bool clock_read_pending = true;
 
+// Set by the +CIPRXGET URC; see the UDP section further down.
+static bool udp_rx_pending = false;
+
 static void pending_sms_push(int index)
 {
     for(int i = 0; i < pending_sms_num; i++) {
@@ -618,6 +621,13 @@ static void handle_urc(const char *line)
         return;
     }
 
+    /* Data waiting on the UDP socket. Like a message arriving, this only
+     * records the fact - collecting it is an AT exchange of its own. */
+    if(strncmp(line, "+CIPRXGET: 1", 12) == 0) {
+        udp_rx_pending = true;
+        return;
+    }
+
     if(strncmp(line, "+CMTI:", 6) == 0) {
         // +CMTI: "SM",3 - a message landed in slot 3.
         const char *comma = strrchr(line, ',');
@@ -934,6 +944,302 @@ static void handle_request(const modem_req_t *req)
     }
 }
 
+//************************************[ UDP socket ]****************************
+/* A single UDP socket, for relaying a tunnel out over the cellular data
+ * context. TinyGSM only ever opens TCP on this modem, so the A76xx socket
+ * commands are driven directly.
+ *
+ * Everything here runs on the modem task, which owns the serial port. Packets
+ * cross between it and the WiFi side through the two queues.
+ *
+ * Manual receive (CIPRXGET=1) is used rather than letting the modem push data
+ * unsolicited: the task is line oriented and an unannounced binary blob in the
+ * middle of an AT exchange would be indistinguishable from a reply. This way
+ * the modem only says that something is waiting, and the task reads it when it
+ * is between commands.
+ */
+#define MODEM_UDP_LINK      0   // socket number; one is all the relay needs
+#define MODEM_UDP_TXQ_DEPTH 4
+#define MODEM_UDP_RXQ_DEPTH 4
+
+typedef struct {
+    uint16_t len;
+    uint8_t  data[MODEM_UDP_MTU];
+} udp_dgram_t;
+
+typedef struct {
+    char     apn[40];
+    char     host[48];
+    uint16_t port;
+    uint16_t local_port;
+} udp_open_req_t;
+
+static QueueHandle_t udp_txq = NULL;   // WiFi side -> modem
+static QueueHandle_t udp_rxq = NULL;   // modem -> WiFi side
+
+static volatile bool udp_open_wanted = false;
+static bool          udp_is_open     = false;
+static udp_open_req_t udp_req;
+static char          udp_error[64]  = {0};
+static uint32_t      udp_retry_at   = 0;
+
+static void udp_set_error(const char *why)
+{
+    strncpy(udp_error, why, sizeof(udp_error) - 1);
+    udp_error[sizeof(udp_error) - 1] = '\0';
+    Serial.printf("[UDP] %s\n", why);
+}
+
+/* Reads exactly `len` bytes of payload. Used after a +CIPRXGET header, where
+ * the data is binary and cannot be read a line at a time. */
+static bool udp_read_payload(uint8_t *buf, uint16_t len, uint32_t timeout_ms)
+{
+    uint16_t got   = 0;
+    uint32_t start = millis();
+
+    while(got < len && millis() - start < timeout_ms) {
+        while(SerialAT.available() && got < len) {
+            buf[got++] = (uint8_t)SerialAT.read();
+        }
+        if(got < len) vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return got == len;
+}
+
+/* Brings up the data context and the socket. */
+static bool udp_open_socket(void)
+{
+    char cmd[128];
+
+    if(udp_req.apn[0]) {
+        snprintf(cmd, sizeof(cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", udp_req.apn);
+        modem_exec(cmd, NULL, 0, 5000);
+    }
+
+    // Manual receive, and report the sender with each datagram.
+    modem_exec("AT+CIPRXGET=1", NULL, 0, 3000);
+    modem_exec("AT+CIPSRIP=1", NULL, 0, 3000);
+
+    /* NETOPEN answers +NETOPEN: 0 on success and errors if it is already up,
+     * which is not a failure worth reporting. */
+    char resp[MODEM_LINE_MAX];
+    if(!modem_exec("AT+NETOPEN", resp, sizeof(resp), 30000)) {
+        if(!modem_exec("AT+NETOPEN?", resp, sizeof(resp), 5000) ||
+           strstr(resp, "+NETOPEN: 1") == NULL) {
+            udp_set_error("no data context - check the APN");
+            return false;
+        }
+    }
+
+    snprintf(cmd, sizeof(cmd), "AT+CIPOPEN=%d,\"UDP\",,,%u",
+             MODEM_UDP_LINK, (unsigned)udp_req.local_port);
+    if(!modem_exec(cmd, NULL, 0, 20000)) {
+        udp_set_error("the modem refused a UDP socket");
+        return false;
+    }
+
+    Serial.printf("[UDP] socket open, relaying to %s:%u\n", udp_req.host, udp_req.port);
+    udp_error[0] = '\0';
+    return true;
+}
+
+static void udp_close_socket(void)
+{
+    char cmd[32];
+
+    snprintf(cmd, sizeof(cmd), "AT+CIPCLOSE=%d", MODEM_UDP_LINK);
+    modem_exec(cmd, NULL, 0, 10000);
+    modem_exec("AT+NETCLOSE", NULL, 0, 10000);
+
+    udp_is_open = false;
+    Serial.println("[UDP] socket closed");
+}
+
+/* Pushes one queued datagram out to the far end. */
+static void udp_pump_tx(void)
+{
+    static udp_dgram_t out;   // static: too big for the task stack
+    char cmd[96];
+    char line[MODEM_LINE_MAX];
+
+    if(xQueueReceive(udp_txq, &out, 0) != pdTRUE) return;
+
+    /* The destination goes on every send. A UDP socket opened without a peer
+     * can address anywhere, which is what lets the far end be changed without
+     * tearing the socket down. */
+    snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%d,%u,\"%s\",%u",
+             MODEM_UDP_LINK, (unsigned)out.len, udp_req.host, (unsigned)udp_req.port);
+
+    while(SerialAT.available()) SerialAT.read();
+    SerialAT.print(cmd);
+    SerialAT.print("\r");
+
+    // Wait for the '>' prompt, as with sending a message.
+    uint32_t start  = millis();
+    bool     prompt = false;
+    while(millis() - start < 3000 && !prompt) {
+        while(SerialAT.available()) {
+            if((char)SerialAT.read() == '>') {
+                prompt = true;
+                break;
+            }
+        }
+        if(!prompt) vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    if(!prompt) {
+        udp_set_error("no send prompt for a datagram");
+        return;
+    }
+
+    SerialAT.write(out.data, out.len);
+
+    start = millis();
+    while(millis() - start < 5000) {
+        if(modem_read_line(line, sizeof(line), 200) < 0) continue;
+        if(strncmp(line, "+CIPSEND:", 9) == 0) continue;
+        if(strcmp(line, "OK") == 0) return;
+        if(strcmp(line, "ERROR") == 0 || strncmp(line, "+CIP", 4) == 0) {
+            Serial.printf("[UDP] send refused: %s\n", line);
+            return;
+        }
+        handle_urc(line);
+    }
+}
+
+/* Collects one waiting datagram from the modem. */
+static void udp_pump_rx(void)
+{
+    static udp_dgram_t in;   // static: too big for the task stack
+    char cmd[48];
+    char line[MODEM_LINE_MAX];
+
+    udp_rx_pending = false;
+
+    snprintf(cmd, sizeof(cmd), "AT+CIPRXGET=2,%d,%d", MODEM_UDP_LINK, MODEM_UDP_MTU);
+    while(SerialAT.available()) SerialAT.read();
+    SerialAT.print(cmd);
+    SerialAT.print("\r");
+
+    uint32_t start = millis();
+    while(millis() - start < 5000) {
+        if(modem_read_line(line, sizeof(line), 200) < 0) continue;
+
+        if(strcmp(line, "ERROR") == 0) return;
+
+        if(strncmp(line, "+CIPRXGET:", 10) == 0) {
+            /* +CIPRXGET: 2,<link>,<read>,<remaining>[,"<ip>",<port>] and then
+             * exactly <read> bytes of payload. */
+            int mode = 0, link = 0, got = 0, left = 0;
+            if(sscanf(line + 10, "%d,%d,%d,%d", &mode, &link, &got, &left) < 3) continue;
+            if(mode != 2 || got <= 0) continue;
+
+            if(got > MODEM_UDP_MTU) got = MODEM_UDP_MTU;
+
+            if(!udp_read_payload(in.data, (uint16_t)got, 3000)) {
+                Serial.println("[UDP] short read on an incoming datagram");
+                return;
+            }
+            in.len = (uint16_t)got;
+
+            if(xQueueSend(udp_rxq, &in, 0) != pdTRUE) {
+                Serial.println("[UDP] receive queue full, datagram dropped");
+            }
+
+            // More may be waiting; the next loop will come back for it.
+            if(left > 0) udp_rx_pending = true;
+            continue;
+        }
+
+        if(strcmp(line, "OK") == 0) return;
+        handle_urc(line);
+    }
+}
+
+/* Called from the task loop, between commands. */
+static void udp_service(void)
+{
+    if(udp_open_wanted && !udp_is_open) {
+        if(udp_retry_at != 0 && millis() < udp_retry_at) return;
+
+        if(udp_open_socket()) {
+            udp_is_open  = true;
+            udp_retry_at = 0;
+        } else {
+            // Do not hammer the modem while whatever is wrong stays wrong.
+            udp_retry_at = millis() + 15000;
+        }
+        return;
+    }
+
+    if(!udp_open_wanted && udp_is_open) {
+        udp_close_socket();
+        return;
+    }
+
+    if(!udp_is_open) return;
+
+    if(udp_rx_pending) udp_pump_rx();
+    udp_pump_tx();
+}
+
+//************************************[ UDP public API ]************************
+void modem_udp_open(const char *apn, const char *host, uint16_t port, uint16_t local_port)
+{
+    if(host == NULL || host[0] == '\0') return;
+
+    memset(&udp_req, 0, sizeof(udp_req));
+    if(apn) strncpy(udp_req.apn, apn, sizeof(udp_req.apn) - 1);
+    strncpy(udp_req.host, host, sizeof(udp_req.host) - 1);
+    udp_req.port       = port;
+    udp_req.local_port = local_port;
+
+    udp_error[0]    = '\0';
+    udp_retry_at    = 0;
+    udp_open_wanted = true;
+}
+
+void modem_udp_close(void)
+{
+    udp_open_wanted = false;
+}
+
+bool modem_udp_is_open(void)
+{
+    return udp_is_open;
+}
+
+void modem_udp_get_error(char *buf, int len)
+{
+    if(buf == NULL || len <= 0) return;
+    strncpy(buf, udp_error, len - 1);
+    buf[len - 1] = '\0';
+}
+
+bool modem_udp_send(const uint8_t *data, uint16_t len)
+{
+    if(udp_txq == NULL || data == NULL || len == 0 || len > MODEM_UDP_MTU) return false;
+
+    static udp_dgram_t pkt;   // only ever touched by the caller's task
+    pkt.len = len;
+    memcpy(pkt.data, data, len);
+
+    return xQueueSend(udp_txq, &pkt, 0) == pdTRUE;
+}
+
+bool modem_udp_receive(uint8_t *buf, uint16_t buf_len, uint16_t *out_len)
+{
+    if(udp_rxq == NULL || buf == NULL) return false;
+
+    static udp_dgram_t pkt;
+    if(xQueueReceive(udp_rxq, &pkt, 0) != pdTRUE) return false;
+
+    uint16_t n = pkt.len > buf_len ? buf_len : pkt.len;
+    memcpy(buf, pkt.data, n);
+    if(out_len) *out_len = n;
+    return true;
+}
+
 //************************************[ task ]**********************************
 static void modem_configure(void)
 {
@@ -1171,16 +1477,19 @@ static void modem_task(void *param)
             if(modem_sync_clock()) clock_read_pending = false;
         }
 
-        // 5. While a call is up, confirm what it is really doing.
+        // 5. The relay socket, if one is up.
+        udp_service();
+
+        // 6. While a call is up, confirm what it is really doing.
         if(status_get_call() != MODEM_CALL_IDLE && millis() - last_call_poll > MODEM_CALL_POLL_MS) {
             last_call_poll = millis();
             modem_poll_call();
         }
 
-        // 6. Periodic signal / registration refresh. Losing the modem here
+        // 7. Periodic signal / registration refresh. Losing the modem here
         //    means it was powered down (the settings screen can do that), so
         //    drop back to detection and reconfigure it when it returns.
-        if(millis() - last_status > MODEM_STATUS_PERIOD_MS) {
+        if(millis() - last_status > MODEM_STATUS_PERIOD_MS && !udp_is_open) {
             last_status = millis();
             if(!modem_refresh_status()) {
                 Serial.println("[MODEM] stopped answering, waiting for it to come back");
@@ -1192,7 +1501,8 @@ static void modem_task(void *param)
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        // A relay wants the loop tight; idle otherwise so the CPU is free.
+        vTaskDelay(pdMS_TO_TICKS(udp_is_open ? 2 : 50));
     }
 }
 
@@ -1209,8 +1519,11 @@ void modem_service_init(bool alive)
     status_lock = xSemaphoreCreateMutex();
     req_queue   = xQueueCreate(MODEM_REQ_QUEUE, sizeof(modem_req_t));
     rx_queue    = xQueueCreate(MODEM_RX_QUEUE, sizeof(modem_sms_rx_t));
+    udp_txq     = xQueueCreate(MODEM_UDP_TXQ_DEPTH, sizeof(udp_dgram_t));
+    udp_rxq     = xQueueCreate(MODEM_UDP_RXQ_DEPTH, sizeof(udp_dgram_t));
 
-    if(status_lock == NULL || req_queue == NULL || rx_queue == NULL) {
+    if(status_lock == NULL || req_queue == NULL || rx_queue == NULL ||
+       udp_txq == NULL || udp_rxq == NULL) {
         Serial.println("[MODEM] service allocation failed");
         return;
     }

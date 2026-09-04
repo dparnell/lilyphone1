@@ -6,6 +6,7 @@
 #include "ui_phone1_port.h"
 #include "system_clock.h"
 #include "timezone_db.h"
+#include "udp_relay.h"
 #include "Arduino.h"
 
 #define SETTING_PAGE_MAX_ITEM 7
@@ -393,8 +394,9 @@ static struct menu_btn menu_btn_list[] =
     {SCREEN6_ID,  &img_batt,    NULL,                "Battery",  95,     189},
     {SCREEN5_ID,  &img_test,    NULL,                "Test",     167,    189},
 
-    {SCREEN11_ID, &img_PCM5102, NULL,                "Sleep",    23,     13},  // Page two
-    {SCREEN9_ID,  NULL,         LV_SYMBOL_POWER,     "Shutdown", 95,     13},
+    {SCREEN16_ID, NULL,         LV_SYMBOL_WIFI,      "Hotspot",  23,     13},  // Page two
+    {SCREEN11_ID, &img_PCM5102, NULL,                "Sleep",    95,     13},
+    {SCREEN9_ID,  NULL,         LV_SYMBOL_POWER,     "Shutdown", 167,    13},
 };
 
 static void menu_btn_event_cb(lv_event_t *e)
@@ -4435,6 +4437,360 @@ static scr_lifecycle_t screen15 = {
     .destroy = destroy15,
 };
 #endif
+//************************************[ screen 16 ]***************************************** hotspot
+#if 1
+/* The phone as a WiFi access point that relays a UDP tunnel out over mobile
+ * data - enough to carry WireGuard from a laptop with no other way out.
+ *
+ * See src/apps/udp_relay.cpp for why this relays to one configured endpoint
+ * instead of routing, and for what to expect of the throughput. */
+static lv_obj_t *scr16_list   = NULL;
+static lv_obj_t *scr16_status = NULL;
+static lv_obj_t *scr16_toggle = NULL;
+static lv_timer_t *scr16_timer = NULL;
+
+// Which field the shared editor was opened for.
+enum {
+    SCR16_FIELD_HOST = 0,
+    SCR16_FIELD_PORT,
+    SCR16_FIELD_APN,
+    SCR16_FIELD_SSID,
+    SCR16_FIELD_PASS,
+    SCR16_FIELD_MAX,
+};
+
+static int scr16_editing = SCR16_FIELD_HOST;
+
+static const struct {
+    const char *name;
+    const char *icon;
+    bool        numeric;
+} scr16_fields[SCR16_FIELD_MAX] = {
+    { "Endpoint",  LV_SYMBOL_UPLOAD,   false },
+    { "Port",      LV_SYMBOL_UPLOAD,   true  },
+    { "APN",       LV_SYMBOL_SETTINGS, false },
+    { "AP name",   LV_SYMBOL_WIFI,     false },
+    { "AP key",    LV_SYMBOL_WIFI,     false },
+};
+
+static void scr16_field_value(int field, char *buf, int len)
+{
+    const udp_relay_cfg_t *c = udp_relay_get_cfg();
+
+    switch(field) {
+        case SCR16_FIELD_HOST: lv_snprintf(buf, len, "%s", c->host[0] ? c->host : "not set"); break;
+        case SCR16_FIELD_PORT: lv_snprintf(buf, len, "%u", (unsigned)c->port); break;
+        case SCR16_FIELD_APN:  lv_snprintf(buf, len, "%s", c->apn[0] ? c->apn : "auto"); break;
+        case SCR16_FIELD_SSID: lv_snprintf(buf, len, "%s", c->ssid); break;
+        case SCR16_FIELD_PASS: lv_snprintf(buf, len, "%s", strlen(c->pass) >= 8 ? "set" : "open"); break;
+        default: buf[0] = '\0'; break;
+    }
+}
+
+static void scr16_render(void)
+{
+    udp_relay_status_t st;
+    char line[160];
+
+    if(scr16_status == NULL) return;
+
+    udp_relay_get_status(&st);
+
+    const char *state = (st.state == UDP_RELAY_RUNNING)  ? "On"
+                      : (st.state == UDP_RELAY_STARTING) ? "Starting"
+                      : (st.state == UDP_RELAY_FAILED)   ? "Failed"
+                                                         : "Off";
+
+    if(st.state == UDP_RELAY_OFF) {
+        lv_snprintf(line, sizeof(line), "%s", state);
+    } else {
+        lv_snprintf(line, sizeof(line), "%s - %s\nout %u  in %u  lost %u",
+                    state, st.detail,
+                    (unsigned)st.to_modem, (unsigned)st.to_client, (unsigned)st.dropped);
+    }
+    lv_label_set_text(scr16_status, line);
+
+    lv_obj_t *label = lv_obj_get_child(scr16_toggle, 0);
+    if(label) lv_label_set_text(label, udp_relay_is_on() ? LV_SYMBOL_STOP "  Stop" : LV_SYMBOL_PLAY "  Start");
+}
+
+static void scr16_timer_event(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    static uint32_t shown = 0xFFFFFFFF;
+    udp_relay_status_t st;
+    udp_relay_get_status(&st);
+
+    // Only repaint when something actually moved: this panel is slow and the
+    // counters tick constantly while a tunnel is up.
+    uint32_t fingerprint = st.to_modem + st.to_client + st.dropped + (uint32_t)st.state * 7919;
+    if(fingerprint == shown) return;
+    shown = fingerprint;
+
+    scr16_render();
+    ui_disp_full_refr();
+}
+
+static void scr16_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr16_toggle_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    if(udp_relay_is_on()) udp_relay_stop();
+    else                  udp_relay_start();
+
+    scr16_render();
+    ui_disp_full_refr();
+}
+
+static void scr16_field_event(lv_event_t *e)
+{
+    scr16_editing = (int)(intptr_t)lv_event_get_user_data(e);
+    scr_mgr_push(SCREEN16_1_ID, false);
+}
+
+static void scr16_populate(void)
+{
+    lv_obj_clean(scr16_list);
+
+    for(int i = 0; i < SCR16_FIELD_MAX; i++) {
+        char value[64];
+        scr16_field_value(i, value, sizeof(value));
+
+        lv_obj_t *row = lv_list_add_btn(scr16_list, scr16_fields[i].icon, scr16_fields[i].name);
+
+        lv_obj_set_height(row, 32);
+        lv_obj_set_style_text_font(row, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
+        lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+        lv_obj_set_style_outline_width(row, 1, LV_PART_MAIN | LV_STATE_PRESSED);
+        lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
+
+        lv_obj_t *state = lv_label_create(row);
+        lv_obj_set_style_text_font(state, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_label_set_long_mode(state, LV_LABEL_LONG_DOT);
+        lv_obj_set_size(state, 96, 16);
+        lv_obj_set_style_text_align(state, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+        lv_label_set_text(state, value);
+
+        lv_obj_add_event_cb(row, scr16_field_event, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    }
+}
+
+static void create16(lv_obj_t *parent)
+{
+    scr16_status = lv_label_create(parent);
+    lv_obj_set_width(scr16_status, lv_pct(94));
+    lv_obj_set_style_text_font(scr16_status, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr16_status, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(scr16_status, LV_LABEL_LONG_WRAP);
+    lv_obj_align(scr16_status, LV_ALIGN_TOP_MID, 0, 34);
+
+    scr16_list = lv_list_create(parent);
+    scr_scroll_for_epaper(scr16_list);
+    lv_obj_set_size(scr16_list, lv_pct(96), LV_VER_RES - 84 - 52);
+    lv_obj_align(scr16_list, LV_ALIGN_TOP_MID, 0, 80);
+    lv_obj_set_style_pad_all(scr16_list, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(scr16_list, 5, LV_PART_MAIN);
+    lv_obj_set_style_radius(scr16_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scr16_list, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr16_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(scr16_list, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(scr16_list, LV_SCROLLBAR_MODE_OFF);
+
+    scr16_populate();
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 44);
+    scr16_toggle = scr_bar_btn_create(bar, LV_SYMBOL_PLAY "  Start", 190, scr16_toggle_event, NULL);
+
+    scr_back_btn_create(parent, "Hotspot", scr16_back_event);
+    scr16_render();
+}
+
+static void entry16(void)
+{
+    scr16_populate();
+    scr16_render();
+
+    if(scr16_timer == NULL) {
+        scr16_timer = lv_timer_create(scr16_timer_event, 1000, NULL);
+    }
+    ui_disp_full_refr();
+}
+
+static void exit16(void)
+{
+    if(scr16_timer) {
+        lv_timer_del(scr16_timer);
+        scr16_timer = NULL;
+    }
+    ui_disp_full_refr();
+}
+
+static void destroy16(void)
+{
+    scr16_list   = NULL;
+    scr16_status = NULL;
+    scr16_toggle = NULL;
+}
+
+static scr_lifecycle_t screen16 = {
+    .create = create16,
+    .entry = entry16,
+    .exit  = exit16,
+    .destroy = destroy16,
+};
+#endif
+// --------------------- screen 16.1 --------------------- one hotspot field
+#if 1
+/* One field at a time, because five text boxes will not fit on this screen and
+ * the hardware keyboard can only be pointed at one of them anyway. */
+static lv_obj_t *scr16_1_field = NULL;
+
+static void scr16_1_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr16_1_save_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    udp_relay_cfg_t cfg = *udp_relay_get_cfg();
+    const char *text = lv_textarea_get_text(scr16_1_field);
+    if(text == NULL) text = "";
+
+    switch(scr16_editing) {
+        case SCR16_FIELD_HOST: lv_snprintf(cfg.host, sizeof(cfg.host), "%s", text); break;
+        case SCR16_FIELD_APN:  lv_snprintf(cfg.apn,  sizeof(cfg.apn),  "%s", text); break;
+        case SCR16_FIELD_SSID: lv_snprintf(cfg.ssid, sizeof(cfg.ssid), "%s", text); break;
+        case SCR16_FIELD_PASS: lv_snprintf(cfg.pass, sizeof(cfg.pass), "%s", text); break;
+        case SCR16_FIELD_PORT: {
+            int port = atoi(text);
+            if(port > 0 && port <= 65535) {
+                // The client points its tunnel at this phone on the same port
+                // it would have used for the far end, which is one less thing
+                // to get wrong in the client's configuration.
+                cfg.port        = (uint16_t)port;
+                cfg.listen_port = (uint16_t)port;
+            }
+            break;
+        }
+        default: break;
+    }
+
+    udp_relay_set_cfg(&cfg);
+    scr_mgr_pop(false);
+}
+
+static const char *scr16_1_keypad_map[] = { "1", "2", "3", "\n",
+                                            "4", "5", "6", "\n",
+                                            "7", "8", "9", "\n",
+                                            ".", "0", LV_SYMBOL_BACKSPACE, ""
+                                          };
+
+static void scr16_1_keypad_event(lv_event_t *e)
+{
+    lv_obj_t   *btnm = (lv_obj_t *)lv_event_get_target(e);
+    const char *txt  = lv_btnmatrix_get_btn_text(btnm, lv_btnmatrix_get_selected_btn(btnm));
+
+    if(txt == NULL) return;
+
+    if(strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) lv_textarea_del_char(scr16_1_field);
+    else                                      lv_textarea_add_text(scr16_1_field, txt);
+}
+
+static void create16_1(lv_obj_t *parent)
+{
+    char value[64];
+
+    // The port and an address are digits, and digits live on the keyboard's
+    // symbol layer, so those get a pad on screen.
+    bool numeric = scr16_fields[scr16_editing].numeric ||
+                   scr16_editing == SCR16_FIELD_HOST;
+
+    switch(scr16_editing) {
+        case SCR16_FIELD_PASS:
+            lv_snprintf(value, sizeof(value), "%s", udp_relay_get_cfg()->pass);
+            break;
+        case SCR16_FIELD_APN:
+            lv_snprintf(value, sizeof(value), "%s", udp_relay_get_cfg()->apn);
+            break;
+        default:
+            scr16_field_value(scr16_editing, value, sizeof(value));
+            if(strcmp(value, "not set") == 0 || strcmp(value, "auto") == 0) value[0] = '\0';
+            break;
+    }
+
+    scr16_1_field = scr_field_create(parent, scr16_fields[scr16_editing].name, 40,
+                                     value, 47);
+
+    lv_obj_t *hint = lv_label_create(parent);
+    lv_obj_set_width(hint, lv_pct(92));
+    lv_obj_set_style_text_font(hint, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(hint, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 100);
+
+    switch(scr16_editing) {
+        case SCR16_FIELD_HOST:
+            lv_label_set_text(hint, "Address of the far end of the tunnel."); break;
+        case SCR16_FIELD_PORT:
+            lv_label_set_text(hint, "Used at both ends: the client points its tunnel at this phone on the same port."); break;
+        case SCR16_FIELD_APN:
+            lv_label_set_text(hint, "Leave empty to let the network choose."); break;
+        case SCR16_FIELD_PASS:
+            lv_label_set_text(hint, "Eight characters or more, or the network is left open."); break;
+        default:
+            lv_label_set_text(hint, " "); break;
+    }
+
+    if(numeric) {
+        lv_obj_t *pad = lv_btnmatrix_create(parent);
+        lv_btnmatrix_set_map(pad, scr16_1_keypad_map);
+        lv_obj_set_size(pad, lv_pct(96), 112);
+        lv_obj_set_style_border_width(pad, 0, LV_PART_MAIN);
+        lv_obj_align(pad, LV_ALIGN_BOTTOM_MID, 0, -48);
+        lv_obj_add_event_cb(pad, scr16_1_keypad_event, LV_EVENT_VALUE_CHANGED, NULL);
+    }
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr16_1_save_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr16_1_back_event, NULL);
+
+    scr_back_btn_create(parent, scr16_fields[scr16_editing].name, scr16_1_back_event);
+}
+
+static void entry16_1(void)
+{
+    lv_group_focus_obj(scr16_1_field);
+    ui_disp_full_refr();
+}
+
+static void exit16_1(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy16_1(void)
+{
+    scr16_1_field = NULL;
+}
+
+static scr_lifecycle_t screen16_1 = {
+    .create = create16_1,
+    .entry = entry16_1,
+    .exit  = exit16_1,
+    .destroy = destroy16_1,
+};
+#endif
 //************************************[ UI ENTRY ]******************************************
 static lv_obj_t *menu_keypad;
 static lv_timer_t *menu_timer = NULL;
@@ -4781,6 +5137,8 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN13_2_ID, &screen13_2);   //  - compose
     scr_mgr_register(SCREEN14_ID,   &screen14);     // Quick settings
     scr_mgr_register(SCREEN15_ID,   &screen15);     // Lock screen
+    scr_mgr_register(SCREEN16_ID,   &screen16);     // Hotspot
+    scr_mgr_register(SCREEN16_1_ID, &screen16_1);   //  - one setting
     
 
     scr_mgr_switch(SCREEN0_ID, false); // set root screen
