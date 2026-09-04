@@ -96,6 +96,8 @@ Two LVGL input devices are registered in `lvgl_init()`: the CST touch panel as a
 
 Horizontal swipes are detected separately by `indev_get_gesture_dir` polling the pointer indev; only the home screen uses it, to page between menu screens. The menu holds 9 buttons per page with hard-coded `pos_x`/`pos_y` per entry, and a second page appears once `menu_btn_list` exceeds 9 items.
 
+**`lv_indev_get_next(NULL)` returns the device registered *last*, not the touch panel.** `lv_indev_drv_register` inserts at the head of the list, and `lvgl_init()` registers the touchpad before the keypad, so the head is the keypad. Anything wanting the touch panel must walk the list for `LV_INDEV_TYPE_POINTER` (`indev_get_pointer()`). Reading the keypad indev by hand is doubly wrong: it yields no coordinates, and `keypad_read` pops the TCA8418 FIFO, stealing keys from LVGL's own handling.
+
 ### Clock
 
 There is no RTC, and two things can say what time it is: a GPS fix and the cellular network (NITZ, read back with `AT+CCLK?`). Both go through `src/apps/system_clock.cpp`, which arbitrates by source — GPS outranks the network, each may refresh itself — and owns the time zone.

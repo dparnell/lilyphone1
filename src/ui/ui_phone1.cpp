@@ -365,7 +365,6 @@ static void menu_get_gesture_dir(int dir)
     if(dir == LV_DIR_LEFT) {
         if(page_curr < page_num){
             page_curr++;
-            // ui_disp_full_refr();
         }
         else{
             return ;
@@ -391,6 +390,10 @@ static void menu_get_gesture_dir(int dir)
         lv_obj_set_style_bg_color(lv_obj_get_child(ui_Panel4, 0), lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_color(lv_obj_get_child(ui_Panel4, 1), lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     }
+
+    // Swapping pages replaces everything below the taskbar, so tell the driver
+    // the whole screen changed and let it decide whether to flash.
+    ui_disp_full_refr();
 }
 
 static void menu_btn_create(lv_obj_t *parent, struct menu_btn *info)
@@ -3678,44 +3681,62 @@ static scr_lifecycle_t screen11 = {
 static lv_obj_t *menu_keypad;
 static lv_timer_t *menu_timer = NULL;
 
+/* The touch panel specifically.
+ *
+ * lv_indev_drv_register() inserts at the head of the list, so
+ * lv_indev_get_next(NULL) hands back whichever device was registered *last* -
+ * the keypad. Reading that here did two wrong things: it never produced a
+ * coordinate, so no swipe was ever detected, and it popped events off the
+ * keyboard FIFO that LVGL's own keypad handling should have had. */
+static lv_indev_t *indev_get_pointer(void)
+{
+    lv_indev_t *indev = NULL;
+
+    while((indev = lv_indev_get_next(indev)) != NULL) {
+        if(indev->driver && indev->driver->type == LV_INDEV_TYPE_POINTER) return indev;
+    }
+    return NULL;
+}
+
 static void indev_get_gesture_dir(lv_timer_t *t)
 {
+    LV_UNUSED(t);
+
+    static lv_point_t press_start;
+    static bool       is_press = false;
+    static bool       fired    = false;
+
+    lv_indev_t *indev = indev_get_pointer();
+    if(indev == NULL) return;
+
     lv_indev_data_t data;
-    lv_indev_t * indev_pointer = lv_indev_get_next(NULL);
-    lv_coord_t diff_x = 0;
-    lv_coord_t diff_y = 0;
+    _lv_indev_read(indev, &data);
 
-    static lv_point_t last_point;
-    static bool is_press = false;
-
-    _lv_indev_read(indev_pointer, &data);
-
-    if(data.state == LV_INDEV_STATE_PR){
-
-        if(is_press == false) {
-            is_press = true;
-            last_point = data.point;
-        }
-
-        diff_x = last_point.x - data.point.x;
-        diff_y = last_point.x - data.point.y;
-
-        if(diff_x > UI_SLIDING_DISTANCE) { // right
-            if(ui_get_gesture_dir) {
-                ui_get_gesture_dir(LV_DIR_LEFT);
-            }
-            last_point.x = 0;
-        } else if(diff_x < -UI_SLIDING_DISTANCE) { // left
-            if(ui_get_gesture_dir) {
-                ui_get_gesture_dir(LV_DIR_RIGHT);
-            }
-            last_point.x = 0;
-        }
-        // Serial.printf("x=%d, y=%d\n", data.point.x, data.point.y);
-    }else{
+    if(data.state != LV_INDEV_STATE_PR) {
         is_press = false;
-        last_point.x = 0;
-        last_point.y = 0;
+        fired    = false;
+        return;
+    }
+
+    if(!is_press) {
+        is_press    = true;
+        fired       = false;
+        press_start = data.point;
+    }
+
+    if(fired || ui_get_gesture_dir == NULL) return;
+
+    // Measured from where the finger landed, and fired at most once per swipe.
+    // The previous version reset the anchor to x=0 after firing, which made the
+    // very next sample look like a full swipe in the opposite direction.
+    lv_coord_t dx = data.point.x - press_start.x;
+
+    if(dx <= -UI_SLIDING_DISTANCE) {
+        ui_get_gesture_dir(LV_DIR_LEFT);
+        fired = true;
+    } else if(dx >= UI_SLIDING_DISTANCE) {
+        ui_get_gesture_dir(LV_DIR_RIGHT);
+        fired = true;
     }
 }
 
