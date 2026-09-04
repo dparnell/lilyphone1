@@ -379,6 +379,20 @@ int sms_add(const char *number, const char *text, uint32_t ts, int dir, int stat
     return msg_num - 1;
 }
 
+bool sms_delete(int idx)
+{
+    if(idx < 0 || idx >= msg_num) return false;
+
+    for(int i = idx; i < msg_num - 1; i++) {
+        msg_list[i] = msg_list[i + 1];
+    }
+    msg_num--;
+    memset(&msg_list[msg_num], 0, sizeof(sms_msg_t));
+
+    sms_save();
+    return true;
+}
+
 bool sms_set_status(int idx, int status)
 {
     if(idx < 0 || idx >= msg_num) return false;
@@ -449,14 +463,20 @@ int sms_thread_msg_count(const char *number)
     return n;
 }
 
-const sms_msg_t *sms_thread_msg(const char *number, int idx)
+int sms_thread_msg_index(const char *number, int idx)
 {
     for(int i = 0; i < msg_num; i++) {
         if(phone_number_match(msg_list[i].number, number)) {
-            if(idx-- == 0) return &msg_list[i];
+            if(idx-- == 0) return i;
         }
     }
-    return NULL;
+    return -1;
+}
+
+const sms_msg_t *sms_thread_msg(const char *number, int idx)
+{
+    int abs = sms_thread_msg_index(number, idx);
+    return abs < 0 ? NULL : &msg_list[abs];
 }
 
 void sms_thread_mark_read(const char *number)

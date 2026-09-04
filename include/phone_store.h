@@ -73,6 +73,9 @@ const sms_msg_t *sms_get(int idx);
  * index it was stored at, or -1 if it could not be stored. */
 int              sms_add(const char *number, const char *text, uint32_t ts, int dir, int status, bool unread);
 bool             sms_set_status(int idx, int status);
+/* Removes one message. Every later message shifts down by one, so any index
+ * held across this call has to be adjusted. */
+bool             sms_delete(int idx);
 bool             sms_save(void);
 
 /* Conversations are the distinct numbers in the log, most recently active
@@ -84,6 +87,10 @@ const sms_msg_t *sms_thread_last(int thread);
 int              sms_thread_unread(const char *number);
 int              sms_thread_msg_count(const char *number);
 const sms_msg_t *sms_thread_msg(const char *number, int idx);
+/* Where the conversation's `idx`th message sits in the whole log, which is
+ * what sms_delete() and sms_set_status() take. -1 when there is no such
+ * message. */
+int              sms_thread_msg_index(const char *number, int idx);
 void             sms_thread_mark_read(const char *number);
 void             sms_thread_delete(const char *number);
 int              sms_unread_total(void);

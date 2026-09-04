@@ -1989,6 +1989,55 @@ static void ui_format_stamp(char *buf, int len, uint32_t ts)
     }
 }
 
+/* Modal confirmation over whatever screen is showing.
+ *
+ * Deleting is one tap and there is no undo, so every delete goes through here.
+ * The button map is file scope on purpose: lv_btnmatrix_set_map stores the
+ * array by pointer rather than copying it, and the dialog outlives the call
+ * that built it. Only one confirmation is ever up at a time. */
+static const char *ui_confirm_btns[3];
+static void (*ui_confirm_action)(void) = NULL;
+
+static void ui_confirm_event(lv_event_t *e)
+{
+    lv_obj_t *mbox = lv_event_get_current_target(e);
+    uint16_t  id   = lv_msgbox_get_active_btn(mbox);
+
+    void (*action)(void) = ui_confirm_action;
+    ui_confirm_action = NULL;
+
+    lv_msgbox_close(mbox);
+
+    if(id == 0 && action) action();
+    ui_disp_full_refr();
+}
+
+static void ui_confirm(const char *title, const char *body, const char *confirm_text,
+                       void (*action)(void))
+{
+    ui_confirm_btns[0] = confirm_text;
+    ui_confirm_btns[1] = "Cancel";
+    ui_confirm_btns[2] = "";
+    ui_confirm_action  = action;
+
+    lv_obj_t *mbox = lv_msgbox_create(NULL, title, body, ui_confirm_btns, false);
+    lv_obj_set_width(mbox, lv_pct(88));
+    lv_obj_set_style_bg_color(mbox, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(mbox, 2, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(mbox, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_font(mbox, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_center(mbox);
+
+    // The default modal backdrop is half-transparent black, which on a 1bpp
+    // panel dithers into noise. An opaque box with a hard border reads better.
+    lv_obj_set_style_bg_opa(lv_obj_get_parent(mbox), LV_OPA_TRANSP, LV_PART_MAIN);
+
+    lv_obj_add_event_cb(mbox, ui_confirm_event, LV_EVENT_VALUE_CHANGED, NULL);
+    ui_disp_full_refr();
+}
+
 /* A button in the top right of a screen, opposite the back button. */
 static lv_obj_t *scr_action_btn_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb)
 {
@@ -2845,6 +2894,8 @@ static scr_lifecycle_t screen13 = {
 static lv_obj_t *scr13_1_cont = NULL;
 static uint32_t  scr13_1_built_revision = 0;
 
+static void scr13_1_populate(void);
+
 static void scr13_1_back_event(lv_event_t *e)
 {
     if(e->code == LV_EVENT_CLICKED) {
@@ -2869,13 +2920,67 @@ static void scr13_1_call_event(lv_event_t *e)
     scr_mgr_push(SCREEN8_1_ID, false);
 }
 
+// The message a tapped bubble refers to, as an index into the whole log.
+static int scr13_1_delete_target = -1;
+
+/* Removing an entry shifts every later index down, including the one the
+ * pending-send watcher is holding on to. */
+static void ui_sms_delete_at(int idx)
+{
+    if(!sms_delete(idx)) return;
+
+    if(ui_send_watch_id != 0) {
+        if(ui_send_watch_idx == idx)     ui_send_watch_id = 0; // the watched message is gone
+        else if(ui_send_watch_idx > idx) ui_send_watch_idx--;
+    }
+    ui_sms_revision++;
+}
+
+static void scr13_1_do_delete_thread(void)
+{
+    sms_thread_delete(ui_active_number);
+
+    // Absolute indexes are meaningless now that a whole conversation left.
+    ui_send_watch_id = 0;
+    ui_sms_revision++;
+    scr_mgr_pop(false);
+}
+
+static void scr13_1_do_delete_message(void)
+{
+    ui_sms_delete_at(scr13_1_delete_target);
+    scr13_1_delete_target = -1;
+
+    // Nothing left to look at once the last message in the thread is gone.
+    if(sms_thread_msg_count(ui_active_number) == 0) {
+        scr_mgr_pop(false);
+        return;
+    }
+    scr13_1_populate();
+}
+
+/* Tapping a message offers to delete just that one. */
+static void scr13_1_bubble_event(lv_event_t *e)
+{
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    const sms_msg_t *m = sms_get(idx);
+    if(m == NULL) return;
+
+    char preview[64];
+    ui_message_snippet(preview, sizeof(preview), m->text);
+
+    scr13_1_delete_target = idx;
+    ui_confirm("Delete message?", preview, LV_SYMBOL_TRASH "  Delete",
+               scr13_1_do_delete_message);
+}
+
 static void scr13_1_delete_event(lv_event_t *e)
 {
     LV_UNUSED(e);
 
-    sms_thread_delete(ui_active_number);
-    ui_sms_revision++;
-    scr_mgr_pop(false);
+    ui_confirm("Delete conversation?",
+               "Every message in this conversation is removed from the phone.",
+               LV_SYMBOL_TRASH "  Delete", scr13_1_do_delete_thread);
 }
 
 /* One message, placed at `y` in the conversation; returns the y the next
@@ -2884,7 +2989,8 @@ static void scr13_1_delete_event(lv_event_t *e)
  * apart. The bubbles are positioned by hand rather than by a flex layout
  * because this build of LVGL has no margin properties to offset one child
  * against the rest. */
-static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, lv_coord_t y)
+static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, int log_idx,
+                                        lv_coord_t y)
 {
     char head[48];
     char stamp[16];
@@ -2910,6 +3016,11 @@ static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, lv
     lv_obj_set_style_pad_all(bubble, 5, LV_PART_MAIN);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(bubble, m->dir == SMS_DIR_OUT ? 42 : 0, y);
+
+    // Tapping a bubble is how a single message gets deleted. A plain object is
+    // not clickable by default.
+    lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(bubble, scr13_1_bubble_event, LV_EVENT_CLICKED, (void *)(intptr_t)log_idx);
 
     lv_obj_t *text = lv_label_create(bubble);
     lv_obj_set_width(text, lv_pct(100));
@@ -2939,8 +3050,9 @@ static void scr13_1_populate(void)
 
     lv_coord_t y = 0;
     for(int i = first; i < total; i++) {
-        const sms_msg_t *m = sms_thread_msg(ui_active_number, i);
-        if(m) y = scr13_1_bubble_create(scr13_1_cont, m, y);
+        int              log_idx = sms_thread_msg_index(ui_active_number, i);
+        const sms_msg_t *m       = sms_get(log_idx);
+        if(m) y = scr13_1_bubble_create(scr13_1_cont, m, log_idx, y);
     }
 
     // Open on the newest message, the way a conversation is normally read.
@@ -2963,10 +3075,12 @@ static void create13_1(lv_obj_t *parent)
 
     scr13_1_populate();
 
+    // "All" rather than a bare bin, so it is clear this button is not the way
+    // to remove one message - tapping the message itself is.
     lv_obj_t *bar = scr_action_bar_create(parent, 38);
     scr_bar_btn_create(bar, LV_SYMBOL_EDIT "  Reply", 76, scr13_1_reply_event, NULL);
     scr_bar_btn_create(bar, LV_SYMBOL_CALL "  Call", 68, scr13_1_call_event, NULL);
-    scr_bar_btn_create(bar, LV_SYMBOL_TRASH, 44, scr13_1_delete_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_TRASH " All", 64, scr13_1_delete_event, NULL);
 
     scr_back_btn_create(parent, contacts_display_name(ui_active_number), scr13_1_back_event);
 }
