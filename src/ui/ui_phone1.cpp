@@ -40,24 +40,26 @@ uint16_t taskbar_statue[TASKBAR_ID_MAX] = {0};
 #if 1
 static lv_obj_t *scr_back_btn_create(lv_obj_t *parent, const char *text, lv_event_cb_t cb)
 {
+    /* The arrow alone, sized as a target rather than fitted to the glyph: the
+     * screen name used to sit beside it and served as extra area to press, so
+     * now that the name is centred the button has to be big enough on its own. */
     lv_obj_t * btn = lv_btn_create(parent);
     lv_obj_remove_style_all(btn);
     lv_obj_set_style_pad_all(btn, 0, 0);
-    lv_obj_set_height(btn, 30);
+    lv_obj_set_size(btn, 40, 30);
     lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 3, 3);
     lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_border_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_ext_click_area(btn, 10);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *label2 = lv_label_create(btn);
-    lv_obj_align(label2, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_text_color(label2, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_label_set_text(label2, LV_SYMBOL_LEFT);
+    lv_obj_t *arrow = lv_label_create(btn);
+    lv_obj_align(arrow, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_text_color(arrow, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_text(arrow, LV_SYMBOL_LEFT);
 
-    // Every caller already passes the screen name, so show it: without a title
-    // the deeper screens were only identifiable by their contents.
     if(text && text[0]) {
         lv_obj_t *title = lv_label_create(parent);
         lv_obj_set_style_text_font(title, FONT_BOLD_SIZE_16, LV_PART_MAIN);
@@ -71,16 +73,7 @@ static lv_obj_t *scr_back_btn_create(lv_obj_t *parent, const char *text, lv_even
         lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
     }
 
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_align_to(label, label2, LV_ALIGN_OUT_RIGHT_MID, 5, -1);
-    lv_obj_set_style_text_font(label, FONT_BOLD_MONO_SIZE_15, LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_label_set_text(label, text);
-    lv_obj_add_flag(label, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(label, cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_set_ext_click_area(label, 20);
-
-    return label;
+    return btn;
 }
 
 static const char *line_full_format(int max_c, const char *str1, const char *str2)
@@ -985,7 +978,7 @@ static void create2_1(lv_obj_t *parent)
     lv_obj_t *bar = scr_action_bar_create(parent, 40);
     scr_bar_btn_create(bar, LV_SYMBOL_SETTINGS "  Time zone", 150, scr2_1_zone_event, NULL);
 
-    lv_obj_t *back2_1_label = scr_back_btn_create(parent, ("Time"), scr2_1_btn_event_cb);
+    scr_back_btn_create(parent, ("Time"), scr2_1_btn_event_cb);
 }
 static void entry2_1(void) 
 {
@@ -1236,7 +1229,7 @@ static void create2_2(lv_obj_t *parent)
     
     lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 35);
     
-    lv_obj_t *back2_2_label = scr_back_btn_create(parent, ("About System"), scr2_2_btn_event_cb);
+    scr_back_btn_create(parent, ("About System"), scr2_2_btn_event_cb);
 }
 static void entry2_2(void) 
 {
@@ -1606,7 +1599,7 @@ static void create3(lv_obj_t *parent)
     lv_obj_center(scr3_cnt_lab);
     lv_obj_align(scr3_cnt_lab, LV_ALIGN_TOP_RIGHT, -10, 10);
 
-    lv_obj_t *back3_label = scr_back_btn_create(parent, ("GPS"), scr3_btn_event_cb);
+    scr_back_btn_create(parent, ("GPS"), scr3_btn_event_cb);
 }
 static void entry3(void) 
 {
@@ -1863,7 +1856,7 @@ static void create4_2(lv_obj_t *parent)
     lv_obj_set_style_border_width(wifi_scan_lab, 0, LV_PART_MAIN);
     lv_label_set_long_mode(wifi_scan_lab, LV_LABEL_LONG_WRAP);
 
-    lv_obj_t *back4_label = scr_back_btn_create(parent, ("Wifi"), scr4_2_btn_event_cb);
+    scr_back_btn_create(parent, ("Wifi"), scr4_2_btn_event_cb);
 }
 static void entry4_2(void)
 {
@@ -2054,7 +2047,7 @@ static void create5(lv_obj_t *parent)
     lv_obj_set_style_text_color(test_page, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(test_page, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_t *back5_label = scr_back_btn_create(parent, ("Test"), scr5_btn_event_cb);
+    scr_back_btn_create(parent, ("Test"), scr5_btn_event_cb);
 }
 static void entry5(void) 
 {
