@@ -75,6 +75,16 @@ bool     modem_is_registered(void);
 uint8_t  modem_get_signal(void);
 void     modem_get_operator(char *buf, int len);
 
+/* Plays a short notification tone through the modem's audio output.
+ *
+ * The modem is the only speaker path on this board: the I2S pins in
+ * utilities.h (BOARD_I2S_BCLK/DOUT/LRC, 7/8/9) are the same pins as the
+ * modem's RI, ITR and RST lines, so driving an external DAC there would reset
+ * the modem. Whether a speaker is actually fitted, and whether this firmware
+ * implements AT+CPTONE, is not something the code can find out - an
+ * unsupported module simply answers ERROR and nothing happens. */
+void     modem_play_tone(void);
+
 /* Runs a raw AT command on the modem task and logs the reply to the monitor.
  * Used by the screens that poke at modem features directly. */
 void     modem_request_at(const char *cmd);

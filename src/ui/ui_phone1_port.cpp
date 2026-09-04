@@ -11,6 +11,7 @@
 #include "peripheral.h"
 #include "WiFi.h"
 #include "modem_service.h"
+#include <Preferences.h>
 #include <ctype.h>
 #include <TouchDrvCSTXXX.hpp>
 
@@ -26,6 +27,14 @@ volatile bool default_gps_status = true;
 volatile bool default_lora_status = true;
 volatile bool default_gyro_status = true;
 volatile bool default_a7682_status = true;
+
+// Notification preferences, persisted in NVS.
+#define NOTIFY_PREFS_NAMESPACE "notify"
+static bool notify_vibrate_call = true;
+static bool notify_vibrate_text = true;
+// Off by default: the only speaker on this board is the modem's, and whether
+// one is fitted is not something the firmware can find out.
+static bool notify_sound_text = false;
 // ----
 
 void ui_disp_full_refr(void)
@@ -390,18 +399,68 @@ void ui_phone_get_operator(char *buf, int len)
 
 static void vibrate_off_cb(lv_timer_t *t)
 {
-    digitalWrite(BOARD_MOTOR_PIN, LOW);
+    // Back to however the manual motor switch in the settings had it, rather
+    // than blindly off, so a buzz does not cancel a deliberate motor test.
+    digitalWrite(BOARD_MOTOR_PIN, default_motor_status ? HIGH : LOW);
     lv_timer_del(t);
 }
 
 void ui_phone_vibrate(int ms)
 {
-    if(!default_motor_status) return;
-
     digitalWrite(BOARD_MOTOR_PIN, HIGH);
 
     lv_timer_t *t = lv_timer_create(vibrate_off_cb, ms, NULL);
     lv_timer_set_repeat_count(t, 1);
+}
+
+//************************************[ notifications ]*************************
+static void notify_save(void)
+{
+    Preferences prefs;
+    if(!prefs.begin(NOTIFY_PREFS_NAMESPACE, false)) return;
+
+    prefs.putBool("vib_call", notify_vibrate_call);
+    prefs.putBool("vib_text", notify_vibrate_text);
+    prefs.putBool("snd_text", notify_sound_text);
+    prefs.end();
+}
+
+void ui_settings_load(void)
+{
+    Preferences prefs;
+    if(!prefs.begin(NOTIFY_PREFS_NAMESPACE, true)) return;
+
+    notify_vibrate_call = prefs.getBool("vib_call", notify_vibrate_call);
+    notify_vibrate_text = prefs.getBool("vib_text", notify_vibrate_text);
+    notify_sound_text   = prefs.getBool("snd_text", notify_sound_text);
+    prefs.end();
+
+    Serial.printf("[NOTIFY] call buzz %d, text buzz %d, text sound %d\n",
+                  notify_vibrate_call, notify_vibrate_text, notify_sound_text);
+}
+
+void ui_setting_set_vibrate_call(bool on) { notify_vibrate_call = on; notify_save(); }
+void ui_setting_set_vibrate_text(bool on) { notify_vibrate_text = on; notify_save(); }
+void ui_setting_set_sound_text(bool on)   { notify_sound_text   = on; notify_save(); }
+
+bool ui_setting_get_vibrate_call(void) { return notify_vibrate_call; }
+bool ui_setting_get_vibrate_text(void) { return notify_vibrate_text; }
+bool ui_setting_get_sound_text(void)   { return notify_sound_text; }
+
+void ui_notify_incoming_call(void)
+{
+    if(notify_vibrate_call) ui_phone_vibrate(400);
+}
+
+void ui_notify_incoming_text(void)
+{
+    if(notify_vibrate_text) ui_phone_vibrate(250);
+
+    // Not over the top of a call: the tone comes out of the same speaker path
+    // the call is using.
+    if(notify_sound_text && modem_get_call_state() == MODEM_CALL_IDLE) {
+        modem_play_tone();
+    }
 }
 
 //************************************[ screen 13 ]***************************************** messaging

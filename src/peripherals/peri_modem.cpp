@@ -38,6 +38,7 @@ enum {
     REQ_HANGUP,
     REQ_SEND_SMS,
     REQ_RAW_AT,
+    REQ_TONE,
 };
 
 typedef struct {
@@ -504,6 +505,14 @@ static void handle_request(const modem_req_t *req)
                            sms_send(req->number, req->text) ? MODEM_SEND_OK : MODEM_SEND_FAILED);
             break;
 
+        case REQ_TONE:
+            // Start, hold briefly, stop. A module without CPTONE answers ERROR
+            // to both, which costs a couple of milliseconds and does nothing.
+            modem_exec("AT+CPTONE=1", NULL, 0, 2000);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            modem_exec("AT+CPTONE=0", NULL, 0, 2000);
+            break;
+
         case REQ_RAW_AT: {
             char resp[MODEM_LINE_MAX];
             bool ok = modem_exec(req->text, resp, sizeof(resp), 5000);
@@ -920,6 +929,14 @@ void modem_get_operator(char *buf, int len)
     strncpy(buf, status.op_name, len - 1);
     buf[len - 1] = '\0';
     xSemaphoreGive(status_lock);
+}
+
+void modem_play_tone(void)
+{
+    modem_req_t req;
+    memset(&req, 0, sizeof(req));
+    req.type = REQ_TONE;
+    modem_post(&req);
 }
 
 void modem_request_at(const char *cmd)

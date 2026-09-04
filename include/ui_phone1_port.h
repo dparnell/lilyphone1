@@ -56,6 +56,22 @@ void ui_setting_set_lora_status(bool on);
 void ui_setting_set_gyro_status(bool on);
 void ui_setting_set_a7682_status(bool on);
 
+/* Notification preferences. Unlike the switches above these persist, since a
+ * notification setting that resets every boot is no setting at all. */
+void ui_setting_set_vibrate_call(bool on);
+void ui_setting_set_vibrate_text(bool on);
+void ui_setting_set_sound_text(bool on);
+bool ui_setting_get_vibrate_call(void);
+bool ui_setting_get_vibrate_text(void);
+bool ui_setting_get_sound_text(void);
+/* Restores them from NVS. Call before the settings screen is built. */
+void ui_settings_load(void);
+
+/* Act on whatever the user has enabled. The call sites do not need to know
+ * which of vibration or sound is switched on. */
+void ui_notify_incoming_call(void);
+void ui_notify_incoming_text(void);
+
 int ui_setting_get_language(void);
 bool ui_setting_get_keypad_light(void);
 bool ui_setting_get_motor_status(void);

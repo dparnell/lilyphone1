@@ -1207,6 +1207,9 @@ static int setting_curr_page = 0;
  * given a misleading one. */
 static ui_setting_handle setting_handle_list[] = {
     {.name = "Time",             .icon = LV_SYMBOL_REFRESH,  .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_1_ID},
+    {.name = "Vibrate on Call",  .icon = LV_SYMBOL_CALL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_vibrate_call, .get_cb = ui_setting_get_vibrate_call},
+    {.name = "Vibrate on Text",  .icon = LV_SYMBOL_ENVELOPE, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_vibrate_text, .get_cb = ui_setting_get_vibrate_text},
+    {.name = "Sound on Text",    .icon = LV_SYMBOL_VOLUME_MAX, .type=UI_SETTING_TYPE_SW, .set_cb = ui_setting_set_sound_text,  .get_cb = ui_setting_get_sound_text},
     {.name = "Keypad Backlight", .icon = LV_SYMBOL_KEYBOARD, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_keypad_light, .get_cb = ui_setting_get_keypad_light},
     {.name = "Motor Status",     .icon = LV_SYMBOL_BELL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
     {.name = "Power GPS",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},
@@ -2706,10 +2709,6 @@ static void entry8_1(void)
     scr8_1_shown_state = MODEM_CALL_IDLE;
     scr8_1_render();
 
-    if(ui_phone_get_call_state() == MODEM_CALL_INCOMING) {
-        ui_phone_vibrate(400);
-    }
-
     if(scr8_1_timer == NULL) {
         scr8_1_timer = lv_timer_create(scr8_1_timer_event, 3000, NULL);
     }
@@ -3861,6 +3860,9 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
  *
  * It also owns the outcome of an outgoing message, so navigating away from the
  * composer still leaves the log with the right delivery status. */
+// How often the motor pulses while a call is ringing.
+#define RING_BUZZ_PERIOD_MS 2000
+
 static void phone_event_timer_cb(lv_timer_t *t)
 {
     LV_UNUSED(t);
@@ -3869,7 +3871,7 @@ static void phone_event_timer_cb(lv_timer_t *t)
     while(ui_sms_poll_received(&rx)) {
         sms_add(rx.number, rx.text, rx.ts, SMS_DIR_IN, SMS_ST_OK, true);
         ui_sms_revision++;
-        ui_phone_vibrate(250);
+        ui_notify_incoming_text();
     }
 
     if(ui_send_watch_id != 0) {
@@ -3885,12 +3887,24 @@ static void phone_event_timer_cb(lv_timer_t *t)
     // pushing it back whenever the state happens to be INCOMING would fight a
     // user who deliberately backed out of it.
     static modem_call_state_t last_call_state = MODEM_CALL_IDLE;
+    static uint32_t           last_ring_buzz  = 0;
     modem_call_state_t call_state = ui_phone_get_call_state();
 
     if(call_state == MODEM_CALL_INCOMING && last_call_state != MODEM_CALL_INCOMING &&
        scr_mgr_current_id() != SCREEN8_1_ID) {
         scr_mgr_push(SCREEN8_1_ID, false);
     }
+
+    // Keep buzzing for as long as it rings, rather than once when the call
+    // screen appears - a single pulse is easy to miss in a pocket.
+    if(call_state == MODEM_CALL_INCOMING) {
+        if(last_call_state != MODEM_CALL_INCOMING ||
+           lv_tick_elaps(last_ring_buzz) >= RING_BUZZ_PERIOD_MS) {
+            last_ring_buzz = lv_tick_get();
+            ui_notify_incoming_call();
+        }
+    }
+
     last_call_state = call_state;
 }
 
@@ -3898,6 +3912,7 @@ void ui_phone1_entry(void)
 {
     // Before any label exists: the wrappers are zeroed until this runs.
     ui_fonts_init();
+    ui_settings_load();
 
     lv_disp_t *disp = lv_disp_get_default();
     disp->theme = lv_theme_mono_init(disp, false, LV_FONT_DEFAULT);

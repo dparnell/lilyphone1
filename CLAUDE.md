@@ -71,7 +71,7 @@ A pushed screen's widgets are destroyed on pop, so a screen cannot return a valu
 ### UI layering
 
 - `src/ui/ui_phone1.cpp` — every screen, all `static`. Shared helpers near the top (`scr_back_btn_create`, `scr_row_create`, `scr_app_list_create`, `scr_action_bar_create`, `scr_field_create`) — reuse them rather than restyling widgets from scratch, since the mono theme needs explicit bg/border/shadow overrides everywhere.
-- `src/ui/ui_phone1_port.cpp` — the only place the UI touches hardware. Screens call `ui_*` wrappers; those call the peripheral layer.
+- `src/ui/ui_phone1_port.cpp` — the only place the UI touches hardware. Screens call `ui_*` wrappers; those call the peripheral layer. Note "Motor Status" in the settings drives the motor pin *directly* and is a manual test, not a notification preference — the notification toggles are separate and persist in NVS (`ui_settings_load()`), while the older `default_*` switches do not persist at all.
 - `src/peripherals/` — one file per device.
 - `src/apps/` — data models with no LVGL dependency.
 
@@ -85,6 +85,12 @@ The UI never blocks on the modem. Requests go down a queue, received messages co
 
 - The URC handler must not perform modem I/O — it can be running in the middle of another command. `+CMTI` therefore only records the SIM slot; the task reads the message later when it is between commands.
 - `TinyGsm modem` (`src/main.cpp`) is only usable before `modem_service_init()` starts the task, during `A7682E_init()`.
+
+### Audio, and the pin conflict behind it
+
+There is **no independent speaker path**. `BOARD_I2S_BCLK/DOUT/LRC` in `utilities.h` are pins 7/8/9, which are also `BOARD_A7682E_RI/ITR/RST` — driving an I2S DAC there would hold the modem in reset. The `Audio` object in `main.cpp` and the `pcm5102` helpers are leftovers from a shared codebase: `Audio` is never initialised, `ui_test_pcm5102a()` returns false, and `ui_pcm5102_cb`/`ui_pcm5102_stop` are declared but never defined. Do not build on them.
+
+The modem is the only route to a speaker, via `modem_play_tone()` (`AT+CPTONE`). Whether a speaker is fitted and whether the firmware implements that command is unverified; an unsupported module answers ERROR and nothing happens, which is why the sound setting defaults to off.
 
 ### Storage
 
