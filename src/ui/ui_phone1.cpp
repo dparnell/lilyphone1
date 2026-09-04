@@ -2368,6 +2368,26 @@ static uint32_t ui_contacts_revision = 0;
 static uint32_t ui_send_watch_id  = 0;
 static int      ui_send_watch_idx = -1;
 
+/* Queues a message and logs it as pending in one step. Shared by the composer
+ * and by sending a reaction, so both end up watched the same way. */
+static bool ui_sms_dispatch(const char *number, const char *text)
+{
+    if(number == NULL || number[0] == '\0') return false;
+    if(text == NULL || text[0] == '\0') return false;
+    if(ui_send_watch_id != 0) return false; // one in flight is enough
+
+    uint32_t send_id = ui_sms_send(number, text);
+    if(send_id == 0) return false;
+
+    // Logged straight away as pending so the conversation reads correctly
+    // however long the network takes.
+    ui_send_watch_idx = sms_add(number, text, (uint32_t)time(NULL),
+                                SMS_DIR_OUT, SMS_ST_PENDING, false);
+    ui_send_watch_id  = send_id;
+    ui_sms_revision++;
+    return true;
+}
+
 static void ui_set_active_number(const char *number)
 {
     if(number == NULL) number = "";
@@ -2487,17 +2507,30 @@ static const struct {
 
 /* Written as byte escapes rather than literal characters so the mapping does
  * not depend on this file's encoding. */
+#define UI_REACT_LIKE      "\xF0\x9F\x91\x8D" // thumbs up
+#define UI_REACT_DISLIKE   "\xF0\x9F\x91\x8E" // thumbs down
+#define UI_REACT_LOVE      "\xE2\x9D\xA4"     // heart
+#define UI_REACT_LAUGH     "\xF0\x9F\x98\x82" // tears of joy
+#define UI_REACT_EMPHASISE "\xE2\x80\xBC"     // double exclamation
+#define UI_REACT_QUESTION  "\xE2\x9D\x93"     // question mark
+
 static const struct {
     const char *utf8;
     const char *word;
 } reaction_emoji[] = {
-    { "\xF0\x9F\x91\x8D", "Liked"      },
-    { "\xF0\x9F\x91\x8E", "Disliked"   },
-    { "\xE2\x9D\xA4",     "Loved"      },
-    { "\xF0\x9F\x98\x82", "Laughed at" },
-    { "\xE2\x80\xBC",     "Emphasised" },
-    { "\xE2\x9D\x93",     "Questioned" },
+    { UI_REACT_LIKE,      "Liked"      },
+    { UI_REACT_DISLIKE,   "Disliked"   },
+    { UI_REACT_LOVE,      "Loved"      },
+    { UI_REACT_LAUGH,     "Laughed at" },
+    { UI_REACT_EMPHASISE, "Emphasised" },
+    { UI_REACT_QUESTION,  "Questioned" },
 };
+
+/* Shortens `s` in place to at most `max_chars` characters, cutting on a UTF-8
+ * boundary and marking the cut with an ellipsis. A reaction quotes the message
+ * it is about and has to fit one segment alongside the wording - and going out
+ * as UCS2 leaves only seventy characters to play with. */
+static void ui_utf8_truncate(char *s, int max_chars);
 
 static int ui_utf8_seq_len(unsigned char c)
 {
@@ -2540,6 +2573,21 @@ static bool ui_quoted_span(const char *s, char *out, int out_len, const char **o
     while(open < close && n < out_len - 1) out[n++] = *open++;
     out[n] = '\0';
     return n > 0;
+}
+
+static void ui_utf8_truncate(char *s, int max_chars)
+{
+    char *p = s;
+    int   chars = 0;
+
+    while(*p && chars < max_chars) {
+        p += ui_utf8_seq_len((unsigned char)*p);
+        chars++;
+    }
+    if(*p == '\0') return; // nothing was dropped
+
+    memcpy(p, "\xE2\x80\xA6", 3); // U+2026
+    p[3] = '\0';
 }
 
 static bool ui_reaction_parse(const char *text, ui_reaction_t *out)
@@ -3319,6 +3367,9 @@ static scr_lifecycle_t screen13 = {
 #if 1
 // Only the tail of a long conversation is built, to bound widget memory.
 #define SCR13_1_MAX_BUBBLES 25
+/* How much of a message a reaction we send quotes back. A UCS2 segment holds
+ * seventy characters and the wording takes a dozen of them. */
+#define SCR13_1_QUOTE_CHARS 50
 
 static lv_obj_t *scr13_1_cont = NULL;
 static uint32_t  scr13_1_built_revision = 0;
@@ -3389,18 +3440,94 @@ static void scr13_1_do_delete_message(void)
 }
 
 /* Tapping a message offers to delete just that one. */
+/* Sends a reaction the way every other phone does over SMS: there is no
+ * protocol for it, so it goes as an ordinary message naming the reaction and
+ * quoting what it is about. The curly quotes are part of that convention, and
+ * are also what push the message into UCS2 on the way out. */
+static void scr13_1_send_reaction(const char *emoji)
+{
+    const sms_msg_t *target = sms_get(scr13_1_delete_target);
+    if(target == NULL) return;
+
+    const char *word = NULL;
+    for(int i = 0; i < (int)GET_BUFF_LEN(reaction_emoji); i++) {
+        if(strcmp(emoji, reaction_emoji[i].utf8) == 0) {
+            word = reaction_emoji[i].word;
+            break;
+        }
+    }
+    if(word == NULL) return;
+
+    char quote[SMS_TEXT_LEN];
+    ui_message_snippet(quote, sizeof(quote), target->text);
+    ui_utf8_truncate(quote, SCR13_1_QUOTE_CHARS);
+
+    char text[SMS_TEXT_LEN];
+    lv_snprintf(text, sizeof(text), "%s \xE2\x80\x9C%s\xE2\x80\x9D", word, quote);
+
+    if(ui_sms_dispatch(ui_active_number, text)) {
+        // The reaction lands in the log as an outgoing message, and the pass in
+        // populate pins it to the message it names, same as a received one.
+        scr13_1_populate();
+    }
+}
+
+static const char *scr13_1_react_map[] = {
+    UI_REACT_LIKE,  UI_REACT_DISLIKE,   UI_REACT_LOVE,     "\n",
+    UI_REACT_LAUGH, UI_REACT_EMPHASISE, UI_REACT_QUESTION, "\n",
+    LV_SYMBOL_TRASH " Delete", "Cancel", ""
+};
+
+static void scr13_1_react_choice_event(lv_event_t *e)
+{
+    lv_obj_t   *mbox = lv_event_get_current_target(e);
+    const char *txt  = lv_msgbox_get_active_btn_text(mbox);
+
+    char chosen[8] = {0};
+    bool remove    = false;
+
+    if(txt) {
+        if(strcmp(txt, LV_SYMBOL_TRASH " Delete") == 0) remove = true;
+        else if(strcmp(txt, "Cancel") != 0) lv_snprintf(chosen, sizeof(chosen), "%s", txt);
+    }
+
+    lv_msgbox_close(mbox);
+
+    if(remove) scr13_1_do_delete_message();
+    else if(chosen[0]) scr13_1_send_reaction(chosen);
+
+    ui_disp_full_refr();
+}
+
+/* Tapping a message is how it gets reacted to or deleted. */
 static void scr13_1_bubble_event(lv_event_t *e)
 {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     const sms_msg_t *m = sms_get(idx);
     if(m == NULL) return;
 
-    char preview[64];
+    char preview[48];
     ui_message_snippet(preview, sizeof(preview), m->text);
+    ui_utf8_truncate(preview, 32);
 
     scr13_1_delete_target = idx;
-    ui_confirm("Delete message?", preview, LV_SYMBOL_TRASH "  Delete",
-               scr13_1_do_delete_message);
+
+    lv_obj_t *mbox = lv_msgbox_create(NULL, "React", preview, scr13_1_react_map, false);
+    lv_obj_set_width(mbox, lv_pct(92));
+    lv_obj_set_style_bg_color(mbox, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(mbox, 2, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(mbox, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_font(mbox, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_center(mbox);
+
+    // The default modal backdrop is half-transparent black, which on a 1bpp
+    // panel dithers into noise.
+    lv_obj_set_style_bg_opa(lv_obj_get_parent(mbox), LV_OPA_TRANSP, LV_PART_MAIN);
+
+    lv_obj_add_event_cb(mbox, scr13_1_react_choice_event, LV_EVENT_VALUE_CHANGED, NULL);
+    ui_disp_full_refr();
 }
 
 static void scr13_1_delete_event(lv_event_t *e)
@@ -3680,18 +3807,10 @@ static void scr13_2_send_event(lv_event_t *e)
         return;
     }
 
-    uint32_t send_id = ui_sms_send(ui_active_number, body);
-    if(send_id == 0) {
+    if(!ui_sms_dispatch(ui_active_number, body)) {
         lv_label_set_text(scr13_2_status, "Modem is busy, try again");
         return;
     }
-
-    // Log it straight away as pending so the conversation reads correctly
-    // however long the network takes.
-    ui_send_watch_idx = sms_add(ui_active_number, body, (uint32_t)time(NULL),
-                                SMS_DIR_OUT, SMS_ST_PENDING, false);
-    ui_send_watch_id  = send_id;
-    ui_sms_revision++;
 
     // Clear before leaving, or exit13_2 keeps the sent text as a draft.
     lv_textarea_set_text(scr13_2_body_ta, "");

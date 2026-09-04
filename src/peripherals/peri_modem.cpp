@@ -268,6 +268,64 @@ static bool ucs2_hex_to_utf8(const char *hex, char *out, size_t out_len)
     return true;
 }
 
+/* True when the modem can carry this text as it stands. CSCS="GSM" means the
+ * body is taken as GSM 7-bit, so anything outside plain ASCII has to go as UCS2
+ * instead - deliberately conservative, since a few ASCII characters differ in
+ * the GSM alphabet but all of them survive the round trip. */
+static bool text_is_gsm7(const char *s)
+{
+    for(const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        if(*p >= 0x80) return false;
+    }
+    return true;
+}
+
+/* The other direction from ucs2_hex_to_utf8: UTF-8 in, the hex a UCS2 message
+ * body is written as out. Returns false on malformed input or no room. */
+static bool utf8_to_ucs2_hex(const char *utf8, char *out, size_t out_len)
+{
+    const unsigned char *p = (const unsigned char *)utf8;
+    size_t o = 0;
+
+    while(*p) {
+        uint32_t cp;
+        int      n;
+
+        if(*p < 0x80)                { cp = *p;        n = 1; }
+        else if((*p & 0xE0) == 0xC0) { cp = *p & 0x1F; n = 2; }
+        else if((*p & 0xF0) == 0xE0) { cp = *p & 0x0F; n = 3; }
+        else if((*p & 0xF8) == 0xF0) { cp = *p & 0x07; n = 4; }
+        else return false;
+
+        for(int k = 1; k < n; k++) {
+            if((p[k] & 0xC0) != 0x80) return false;
+            cp = (cp << 6) | (uint32_t)(p[k] & 0x3F);
+        }
+        p += n;
+
+        uint16_t units[2];
+        int      count = 1;
+
+        if(cp >= 0x10000) {
+            cp -= 0x10000;
+            units[0] = (uint16_t)(0xD800 + (cp >> 10));
+            units[1] = (uint16_t)(0xDC00 + (cp & 0x3FF));
+            count = 2;
+        } else {
+            units[0] = (uint16_t)cp;
+        }
+
+        for(int k = 0; k < count; k++) {
+            if(o + 5 > out_len) return false;
+            snprintf(out + o, out_len - o, "%04X", units[k]);
+            o += 4;
+        }
+    }
+
+    out[o] = '\0';
+    return o > 0;
+}
+
 /* Fallback for firmwares that do not report the data coding scheme.
  *
  * Requires a hex letter as well as the right shape, so that a message whose
@@ -584,6 +642,26 @@ static bool sms_send(const char *number, const char *text)
 {
     char cmd[CONTACT_NUMBER_LEN + 16];
     char line[MODEM_LINE_MAX];
+    char hex[SMS_HEX_BODY_MAX];
+
+    /* Text the GSM alphabet cannot carry goes out as UCS2 instead: CSMP sets
+     * the data coding scheme to 8 and the body is then written as hex, the
+     * mirror of how one arrives. Reactions need this - the convention other
+     * phones use is built out of curly quotes. */
+    bool ucs2 = !text_is_gsm7(text);
+
+    if(ucs2) {
+        if(!utf8_to_ucs2_hex(text, hex, sizeof(hex))) {
+            Serial.println("[MODEM] cannot encode message as UCS2");
+            return false;
+        }
+        if(!modem_exec("AT+CSMP=17,167,0,8", NULL, 0, 2000)) {
+            // Without the right coding scheme the bytes would arrive as
+            // nonsense, so give up rather than send something unreadable.
+            Serial.println("[MODEM] modem would not accept a UCS2 coding scheme");
+            return false;
+        }
+    }
 
     while(SerialAT.available()) SerialAT.read();
 
@@ -603,28 +681,37 @@ static bool sms_send(const char *number, const char *text)
         if(!prompt) vTaskDelay(pdMS_TO_TICKS(10));
     }
 
+    // Whatever happens from here, put the coding scheme back so the next
+    // message is not sent as UCS2 by accident.
+    bool sent = false;
+
     if(!prompt) {
         Serial.println("[MODEM] no send prompt");
         // Abort the half-issued command so the modem does not stay in text mode.
         SerialAT.write(0x1B);
-        return false;
+    } else {
+        SerialAT.print(ucs2 ? hex : text);
+        SerialAT.write(0x1A); // Ctrl-Z ends the body
+
+        // The network can take a while to accept a message.
+        start = millis();
+        while(millis() - start < 60000) {
+            if(modem_read_line(line, sizeof(line), 500) < 0) continue;
+
+            if(strncmp(line, "+CMGS:", 6) == 0) continue; // reference number
+            if(strcmp(line, "OK") == 0) {
+                sent = true;
+                break;
+            }
+            if(strcmp(line, "ERROR") == 0) break;
+            if(strncmp(line, "+CMS ERROR", 10) == 0) break;
+            handle_urc(line);
+        }
     }
 
-    SerialAT.print(text);
-    SerialAT.write(0x1A); // Ctrl-Z ends the body
+    if(ucs2) modem_exec("AT+CSMP=17,167,0,0", NULL, 0, 2000);
 
-    // The network can take a while to accept a message.
-    start = millis();
-    while(millis() - start < 60000) {
-        if(modem_read_line(line, sizeof(line), 500) < 0) continue;
-
-        if(strncmp(line, "+CMGS:", 6) == 0) continue; // reference number
-        if(strcmp(line, "OK") == 0) return true;
-        if(strcmp(line, "ERROR") == 0) return false;
-        if(strncmp(line, "+CMS ERROR", 10) == 0) return false;
-        handle_urc(line);
-    }
-    return false;
+    return sent;
 }
 
 static void handle_request(const modem_req_t *req)
@@ -692,6 +779,13 @@ static void modem_configure(void)
     modem_exec("AT+CSCS=\"GSM\"", NULL, 0, 2000);
     modem_exec("AT+CPMS=\"SM\",\"SM\",\"SM\"", NULL, 0, 5000);
     modem_exec("AT+CNMI=2,1,0,0,0", NULL, 0, 2000);
+
+    // Report the data coding scheme with each message, so a UCS2 body can be
+    // told apart from one that merely looks like hex.
+    modem_exec("AT+CSDH=1", NULL, 0, 2000);
+    // The coding scheme for what we send. sms_send switches to UCS2 per message
+    // when the text needs it and puts this back afterwards.
+    modem_exec("AT+CSMP=17,167,0,0", NULL, 0, 2000);
 
     // Let the network set the module's clock (NITZ) and tell us when it moves.
     // This is what makes AT+CCLK? worth reading: without CTZU the module just

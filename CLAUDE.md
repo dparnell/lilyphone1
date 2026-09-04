@@ -53,7 +53,9 @@ In text mode with `CSCS="GSM"`, a message whose data coding scheme is UCS2 arriv
 
 Storage is therefore UTF-8 and `SMS_TEXT_LEN` (321) is sized for decoded multi-byte text, while `SMS_COMPOSE_MAX` (160) is what the composer allows for a single outgoing segment.
 
-**Reactions are ordinary messages.** SMS has no reaction protocol: the reacting phone sends a sentence quoting the message it refers to (`Liked "..."`, or an emoji then ` to "..."`). `ui_reaction_parse()` recognises those, and `scr13_1_populate()` does a pre-pass that pins each one to the nearest earlier message its quote matches, drawing it as a badge on that bubble instead of as a message of its own. The quote is matched as a *prefix* with any trailing ellipsis stripped, because a long message is only quoted as far as the sending phone chose to. A reaction whose target is not in the window falls back to being drawn as an annotation.
+Outgoing messages are GSM-7 by default. `sms_send()` switches a single message to UCS2 (`AT+CSMP` with dcs 8, body written as hex) when `text_is_gsm7()` says the text needs it, and restores the default afterwards - which is what lets a reaction carry the curly quotes the convention is built from.
+
+**Reactions are ordinary messages.** SMS has no reaction protocol: the reacting phone sends a sentence quoting the message it refers to (`Liked "..."`, or an emoji then ` to "..."`). `ui_reaction_parse()` recognises those, and `scr13_1_populate()` does a pre-pass that pins each one to the nearest earlier message its quote matches, drawing it as a badge on that bubble instead of as a message of its own. The quote is matched as a *prefix* with any trailing ellipsis stripped, because a long message is only quoted as far as the sending phone chose to. A reaction whose target is not in the window falls back to being drawn as an annotation. Tapping a bubble offers the same six reactions back, sent as the same kind of sentence.
 
 ## Architecture
 
