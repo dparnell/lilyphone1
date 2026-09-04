@@ -73,6 +73,8 @@ The panel is parked (`hibernate`) a few seconds after the last update rather tha
 
 The draw buffer and the packed 1bpp buffer are allocated with `disp_buf_alloc()`, which prefers internal RAM and falls back to PSRAM. PSRAM is several times slower for the pixel-by-pixel access both see, and with `full_refresh` that cost is paid over the whole screen every time. There is one draw buffer, not two: the panel push is synchronous in the LVGL task, so a second buffer would never be rendered into.
 
+**Scrolling needs two things this panel would not get by default.** LVGL enables elastic overshoot and momentum on every object, and every frame of that post-release animation is a full repaint the display cannot deliver in time - so the list crawls along behind a queue of them. `scr_scroll_for_epaper()` clears both, and every scrolling container in the UI goes through it. On top of that, `flush_timer_cb` rate-limits repaints to `DISP_DRAG_UPDATE_MS` while a touch is held (`touch_is_down`, set by `touchpad_read`), since the finger has moved on several times over by the time one lands; releasing paints the position it actually ended at.
+
 The flush blocks the LVGL task for the whole panel update, so a tap that starts and ends inside that window is never sampled and is lost. Sampling touch from its own task (the CST328 has an INT line on `BOARD_TOUCH_INT`) would fix it, at the cost of sharing `Wire` with the keypad read across tasks.
 
 ### Screen manager

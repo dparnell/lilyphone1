@@ -207,6 +207,19 @@ static lv_obj_t *scr_action_btn_create(lv_obj_t *parent, const char *symbol, lv_
     return btn;
 }
 
+/* Scrolling that this panel can keep up with.
+ *
+ * LVGL gives every object elastic overshoot and momentum. Both keep animating
+ * after the finger lifts, and on e-paper every frame of that is a full repaint
+ * that the display cannot deliver in time - so the list crawls along behind a
+ * queue of them. One-to-one scrolling that stops when the finger stops is the
+ * only kind worth having here. */
+static void scr_scroll_for_epaper(lv_obj_t *obj)
+{
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLL_ELASTIC);
+}
+
 /* The scrolling list body every app screen uses below its title bar. */
 static lv_obj_t *scr_app_list_create(lv_obj_t *parent)
 {
@@ -220,6 +233,7 @@ static lv_obj_t *scr_app_list_create(lv_obj_t *parent)
     lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(list, 0, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+    scr_scroll_for_epaper(list);
     return list;
 }
 
@@ -699,6 +713,7 @@ static void scr1_btn_event_cb(lv_event_t * e)
 static void create1(lv_obj_t *parent) 
 {
     scr1_list = lv_list_create(parent);
+    scr_scroll_for_epaper(scr1_list);
     lv_obj_set_size(scr1_list, lv_pct(93), lv_pct(91));
     lv_obj_align(scr1_list, LV_ALIGN_BOTTOM_MID, 0, 0);
     // lv_obj_set_style_bg_color(scr1_list, lv_color_hex(EPD_COLOR_BG), LV_PART_MAIN);
@@ -1130,6 +1145,7 @@ static void create2_1_1(lv_obj_t *parent)
     lv_obj_set_style_border_width(scr2_1_1_list, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(scr2_1_1_list, 0, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(scr2_1_1_list, LV_SCROLLBAR_MODE_OFF);
+    scr_scroll_for_epaper(scr2_1_1_list);
 
     scr2_1_1_populate();
 
@@ -1356,6 +1372,7 @@ static void setting_item_create(int curr_apge)
 static void create2(lv_obj_t *parent) 
 {
     setting_list = lv_list_create(parent);
+    scr_scroll_for_epaper(setting_list);
     lv_obj_set_size(setting_list, LV_HOR_RES, lv_pct(88));
     lv_obj_align(setting_list, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(setting_list, DECKPRO_COLOR_BG, LV_PART_MAIN);
@@ -1673,6 +1690,7 @@ static void scr4_btn_event_cb(lv_event_t * e)
 static void create4(lv_obj_t *parent) 
 {
     scr4_list = lv_list_create(parent);
+    scr_scroll_for_epaper(scr4_list);
     lv_obj_set_size(scr4_list, lv_pct(93), lv_pct(91));
     lv_obj_align(scr4_list, LV_ALIGN_BOTTOM_MID, 0, 0);
     // lv_obj_set_style_bg_color(scr4_list, lv_color_hex(EPD_COLOR_BG), LV_PART_MAIN);
@@ -1947,6 +1965,7 @@ static void test_item_create(int curr_apge)
 static void create5(lv_obj_t *parent) 
 {
     test_list = lv_list_create(parent);
+    scr_scroll_for_epaper(test_list);
     lv_obj_set_size(test_list, LV_HOR_RES, lv_pct(88));
     lv_obj_align(test_list, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(test_list, DECKPRO_COLOR_BG, LV_PART_MAIN);
@@ -2106,6 +2125,7 @@ static void scr6_btn_event_cb(lv_event_t * e)
 static void create6(lv_obj_t *parent) 
 {
     scr6_list = lv_list_create(parent);
+    scr_scroll_for_epaper(scr6_list);
     lv_obj_set_size(scr6_list, lv_pct(93), lv_pct(91));
     lv_obj_align(scr6_list, LV_ALIGN_BOTTOM_MID, 0, 0);
     // lv_obj_set_style_bg_color(scr6_list, lv_color_hex(EPD_COLOR_BG), LV_PART_MAIN);
@@ -3771,6 +3791,7 @@ static void create13_1(lv_obj_t *parent)
     lv_obj_set_style_pad_all(scr13_1_cont, 2, LV_PART_MAIN);
     lv_obj_set_scroll_dir(scr13_1_cont, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(scr13_1_cont, LV_SCROLLBAR_MODE_OFF);
+    scr_scroll_for_epaper(scr13_1_cont);
 
     scr13_1_populate();
 

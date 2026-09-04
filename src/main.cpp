@@ -34,10 +34,18 @@ int disp_refr_mode = DISP_REFR_MODE_PART;
 #define DISP_FULL_REFRESH_EVERY 8
 #define DISP_HIBERNATE_DELAY_MS 4000
 
+/* A drag produces a new scroll position every refresh period, and the panel
+ * takes a few hundred milliseconds to show one - so painting them all puts the
+ * display permanently behind the finger. While the touch is held, updates are
+ * limited to this; letting go paints the final position immediately. */
+#define DISP_DRAG_UPDATE_MS 700
+
 // Start at the threshold so the first screen after boot gets a clean full pass.
 static int         changes_since_full = DISP_FULL_REFRESH_EVERY;
 static lv_timer_t *hibernate_timer    = NULL;
 static bool        panel_hibernating  = true;
+static volatile bool touch_is_down    = false; // set by touchpad_read
+static uint32_t    last_flush_ms      = 0;
 const char HelloWorld[] = "LilyPhone1";
 
 bool peri_init_st[E_PERI_NUM_MAX] = {0};
@@ -124,6 +132,13 @@ static void flush_timer_cb(lv_timer_t *t)
     static int idx = 0;
     lv_disp_t *disp = lv_disp_get_default();
     if(disp->rendering_in_progress == false) {
+        /* Mid drag: the finger has moved on several times over by the time one
+         * of these lands, so paint at most occasionally and leave the timer
+         * running. The release paints the position it actually ended at. */
+        if(touch_is_down && (millis() - last_flush_ms) < DISP_DRAG_UPDATE_MS) {
+            return;
+        }
+
         lv_coord_t w = LV_HOR_RES;
         lv_coord_t h = LV_VER_RES;
 
@@ -154,6 +169,7 @@ static void flush_timer_cb(lv_timer_t *t)
         }
         while (display.nextPage());
 
+        last_flush_ms = millis();
         hibernate_schedule();
 
         Serial.printf("flush_timer_cb:%d, %s\n", idx++, (full ? "full" : "part"));
@@ -238,6 +254,9 @@ static void touchpad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
     static lv_coord_t last_y = 0;
 
     uint8_t touched = touch.getPoint(&last_x, &last_y, 1);
+
+    touch_is_down = touched != 0;
+
     if(touched) {
         // Touch is sampled every 10ms; logging every sample floods the USB CDC
         // link and can stall the LVGL task waiting on it.
