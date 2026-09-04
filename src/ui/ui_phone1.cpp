@@ -3,6 +3,7 @@
 #include "assets.h"
 #include "stdio.h"
 #include "ui_phone1_port.h"
+#include "system_clock.h"
 #include "Arduino.h"
 
 #define SETTING_PAGE_MAX_ITEM 7
@@ -651,11 +652,65 @@ static void scr2_1_btn_event_cb(lv_event_t * e)
 #include "timezone_names.h"
 extern bool updated_time_from_gps;
 
+static lv_obj_t   *scr2_1_status = NULL;
+static lv_timer_t *scr2_1_timer  = NULL;
+
+/* Shows what the clock currently reads and which source set it. Without this
+ * there is no way to tell whether the time came off the network, off a
+ * satellite fix, or is still the power-on default. */
+static void scr2_1_render(void)
+{
+    char line[160];
+    char when[40] = "--:--:--";
+
+    if(system_clock_is_set()) {
+        time_t    now = time(NULL);
+        struct tm now_tm;
+        localtime_r(&now, &now_tm);
+        strftime(when, sizeof(when), "%Y-%m-%d  %H:%M:%S", &now_tm);
+    }
+
+    int  offset = system_clock_get_utc_offset();
+    char zone[24];
+    if(system_clock_has_utc_offset()) {
+        lv_snprintf(zone, sizeof(zone), "UTC%c%d:%02d", offset < 0 ? '-' : '+',
+                    abs(offset) / 60, abs(offset) % 60);
+    } else {
+        lv_snprintf(zone, sizeof(zone), "UTC (none reported)");
+    }
+
+    char operator_name[MODEM_OPERATOR_LEN];
+    ui_phone_get_operator(operator_name, sizeof(operator_name));
+
+    lv_snprintf(line, sizeof(line),
+                "%s\n\nSource: %s\nZone: %s\nNetwork: %s",
+                when, system_clock_source_name(), zone,
+                ui_phone_is_registered() ? (operator_name[0] ? operator_name : "registered")
+                                         : "searching");
+
+    lv_label_set_text(scr2_1_status, line);
+}
+
+static void scr2_1_timer_event(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+    scr2_1_render();
+}
+
 static void create2_1(lv_obj_t *parent) 
 {
+    scr2_1_status = lv_label_create(parent);
+    lv_obj_set_width(scr2_1_status, lv_pct(92));
+    lv_obj_set_style_text_font(scr2_1_status, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr2_1_status, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(scr2_1_status, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(scr2_1_status, LV_LABEL_LONG_WRAP);
+    lv_obj_align(scr2_1_status, LV_ALIGN_TOP_MID, 0, 40);
+    scr2_1_render();
+
     lv_obj_t* timezone_dd = lv_dropdown_create(parent);
     lv_dropdown_set_options_static(timezone_dd, timezone_names);
-    lv_obj_align(timezone_dd, LV_ALIGN_TOP_MID, 0, 35);
+    lv_obj_align(timezone_dd, LV_ALIGN_TOP_MID, 0, 170);
 
     lv_obj_t *back2_1_label = scr_back_btn_create(parent, ("Time"), scr2_1_btn_event_cb);
 }
@@ -664,12 +719,22 @@ static void entry2_1(void)
     ui_disp_full_refr();
     updated_time_from_gps = false;
     gps_task_resume();
+
+    // Slow enough that watching the clock sync does not thrash the panel.
+    if(scr2_1_timer == NULL) {
+        scr2_1_timer = lv_timer_create(scr2_1_timer_event, 5000, NULL);
+    }
 }
 static void exit2_1(void) {
     ui_disp_full_refr();
     gps_task_suspend();
+
+    if(scr2_1_timer) {
+        lv_timer_del(scr2_1_timer);
+        scr2_1_timer = NULL;
+    }
 }
-static void destroy2_1(void) { }
+static void destroy2_1(void) { scr2_1_status = NULL; }
 
 static scr_lifecycle_t screen2_1 = {
     .create = create2_1,

@@ -16,6 +16,7 @@
 #include "utilities.h"
 #include "peripheral.h"
 #include "modem_service.h"
+#include "system_clock.h"
 
 #define MODEM_LINE_MAX     256
 #define MODEM_REQ_QUEUE    6
@@ -26,6 +27,10 @@
 #define MODEM_STATUS_PERIOD_MS 15000
 // How often the state of a call in progress is confirmed with the modem.
 #define MODEM_CALL_POLL_MS     2000
+// How long to wait before asking for the network time again. Carriers vary in
+// how promptly they broadcast NITZ after registration and some never do, so a
+// failed read must not turn into a tight loop of AT commands.
+#define MODEM_CLOCK_RETRY_MS   30000
 
 enum {
     REQ_DIAL = 0,
@@ -69,6 +74,11 @@ static uint32_t       next_send_id = 1;
 #define PENDING_SMS_MAX 8
 static int pending_sms[PENDING_SMS_MAX];
 static int pending_sms_num = 0;
+
+/* Set when the network announces a time or zone change, and once at startup, so
+ * the task knows to read the module's clock. Like the SMS slots this cannot be
+ * acted on from the URC handler, which may be running mid-command. */
+static bool clock_read_pending = true;
 
 static void pending_sms_push(int index)
 {
@@ -186,28 +196,56 @@ static bool urc_quoted_last(const char *line, char *out, int len)
     return n > 0;
 }
 
-/* `25/09/04,10:22:33+40` as delivered in +CMGR. Returns 0 when the stamp can
- * not be parsed, in which case the caller falls back to the local clock. */
+/* A modem timestamp, converted to UTC. */
+typedef struct {
+    int  year, mon, day;
+    int  hour, min, sec;
+    int  offset_min;   // local offset east of Greenwich, when the stamp carried one
+    bool has_offset;
+} modem_stamp_t;
+
+/* Parses `25/09/04,10:22:33+40` as used by both +CMGR and +CCLK?: a local time
+ * followed by the offset from GMT in quarter hours, so +40 means UTC+10. The
+ * offset is optional - some firmwares leave it off +CCLK?.
+ *
+ * The fields come back as UTC, with `day` possibly sitting one outside the
+ * month when removing the offset stepped over midnight; system_clock takes
+ * that in its stride. */
+static bool parse_modem_stamp(const char *stamp, modem_stamp_t *out)
+{
+    int year, mon, day, hour, min, sec;
+    int quarters = 0;
+
+    int n = sscanf(stamp, "%d/%d/%d,%d:%d:%d%d", &year, &mon, &day, &hour, &min, &sec, &quarters);
+    if(n < 6) return false;
+
+    out->has_offset = (n >= 7);
+    out->offset_min = out->has_offset ? quarters * 15 : 0;
+
+    // Work in minutes so the half and quarter hour zones survive.
+    int utc_minutes = hour * 60 + min - out->offset_min;
+    int date_shift  = 0;
+
+    while(utc_minutes < 0)     { utc_minutes += 24 * 60; date_shift--; }
+    while(utc_minutes >= 1440) { utc_minutes -= 24 * 60; date_shift++; }
+
+    out->year = year + 2000;
+    out->mon  = mon;
+    out->day  = day + date_shift;
+    out->hour = utc_minutes / 60;
+    out->min  = utc_minutes % 60;
+    out->sec  = sec;
+    return true;
+}
+
+/* Epoch seconds for a +CMGR service centre timestamp. Returns 0 when the stamp
+ * cannot be parsed, in which case the caller falls back to the local clock. */
 static uint32_t parse_sms_timestamp(const char *stamp)
 {
-    struct tm t;
-    int year, mon, day, hour, min, sec;
+    modem_stamp_t t;
 
-    if(sscanf(stamp, "%d/%d/%d,%d:%d:%d", &year, &mon, &day, &hour, &min, &sec) != 6) {
-        return 0;
-    }
-
-    memset(&t, 0, sizeof(t));
-    t.tm_year = year + 100; // two digit year, 2000-based
-    t.tm_mon  = mon - 1;
-    t.tm_mday = day;
-    t.tm_hour = hour;
-    t.tm_min  = min;
-    t.tm_sec  = sec;
-    t.tm_isdst = -1;
-
-    time_t ts = mktime(&t);
-    return ts > 0 ? (uint32_t)ts : 0;
+    if(!parse_modem_stamp(stamp, &t)) return 0;
+    return system_clock_epoch_from_utc(t.year, t.mon, t.day, t.hour, t.min, t.sec);
 }
 
 static void sms_deliver(const char *number, const char *text, uint32_t ts)
@@ -358,6 +396,15 @@ static void handle_urc(const char *line)
         return;
     }
 
+    // The network pushed a time or time zone update. SIMCom firmwares differ
+    // over which of these they emit, so watch for all of them and just take it
+    // as a hint to re-read the module clock.
+    if(strncmp(line, "*PSUTTZ:", 8) == 0 || strncmp(line, "+CTZV:", 6) == 0 ||
+       strncmp(line, "+CTZE:", 6) == 0 || strncmp(line, "DST:", 4) == 0) {
+        clock_read_pending = true;
+        return;
+    }
+
     if(strncmp(line, "+CMTI:", 6) == 0) {
         // +CMTI: "SM",3 - a message landed in slot 3.
         const char *comma = strrchr(line, ',');
@@ -482,6 +529,14 @@ static void modem_configure(void)
     modem_exec("AT+CSCS=\"GSM\"", NULL, 0, 2000);
     modem_exec("AT+CPMS=\"SM\",\"SM\",\"SM\"", NULL, 0, 5000);
     modem_exec("AT+CNMI=2,1,0,0,0", NULL, 0, 2000);
+
+    // Let the network set the module's clock (NITZ) and tell us when it moves.
+    // This is what makes AT+CCLK? worth reading: without CTZU the module just
+    // free-runs from whatever it powered up with.
+    modem_exec("AT+CTZU=1", NULL, 0, 2000);
+    modem_exec("AT+CTZR=1", NULL, 0, 2000);
+
+    clock_read_pending = true;
 }
 
 /* Drains any messages that arrived while we were powered down. */
@@ -558,6 +613,39 @@ static void modem_poll_call(void)
     }
 }
 
+/* Reads the module's real time clock and hands it to the system clock.
+ *
+ * AT+CTZU=1 asks the module to keep this clock in step with the network's NITZ
+ * broadcast, so this is the network's idea of the time. It also carries the
+ * local UTC offset, which is the one thing a GPS fix cannot tell us.
+ *
+ * Returns true once a genuine time has been read, so the caller can stop
+ * asking; carriers vary in how promptly they send NITZ after registration, and
+ * some never do. */
+static bool modem_sync_clock(void)
+{
+    char resp[MODEM_LINE_MAX];
+    char stamp[40];
+
+    if(!modem_exec("AT+CCLK?", resp, sizeof(resp), 3000)) return false;
+    if(!urc_quoted_last(resp, stamp, sizeof(stamp))) return false;
+
+    modem_stamp_t t;
+    if(!parse_modem_stamp(stamp, &t)) {
+        Serial.printf("[MODEM] cannot read clock from '%s'\n", stamp);
+        return false;
+    }
+
+    // A module that has not heard NITZ yet reports its power-on placeholder,
+    // which system_clock rejects on the year.
+    if(!system_clock_set_utc(CLOCK_SRC_NETWORK, t.year, t.mon, t.day, t.hour, t.min, t.sec)) {
+        return false;
+    }
+
+    if(t.has_offset) system_clock_set_utc_offset(t.offset_min);
+    return true;
+}
+
 /* Returns false when the modem did not answer at all, which is how the task
  * notices it was powered down from the settings screen. */
 static bool modem_refresh_status(void)
@@ -608,6 +696,7 @@ static void modem_task(void *param)
     modem_req_t req;
     uint32_t    last_status    = 0;
     uint32_t    last_call_poll = 0;
+    uint32_t    last_clock_try = 0; // 0 means "not tried yet", so the first go is immediate
     bool        configured     = false;
 
     for(;;) {
@@ -648,13 +737,22 @@ static void modem_task(void *param)
             handle_request(&req);
         }
 
-        // 4. While a call is up, confirm what it is really doing.
+        // 4. Pick up a network time when one has been announced, or until the
+        //    first read succeeds. Registration comes first - there is no NITZ
+        //    to have received before the phone is on a network.
+        if(clock_read_pending && configured && modem_is_registered() &&
+           (last_clock_try == 0 || millis() - last_clock_try > MODEM_CLOCK_RETRY_MS)) {
+            last_clock_try = millis();
+            if(modem_sync_clock()) clock_read_pending = false;
+        }
+
+        // 5. While a call is up, confirm what it is really doing.
         if(status_get_call() != MODEM_CALL_IDLE && millis() - last_call_poll > MODEM_CALL_POLL_MS) {
             last_call_poll = millis();
             modem_poll_call();
         }
 
-        // 5. Periodic signal / registration refresh. Losing the modem here
+        // 6. Periodic signal / registration refresh. Losing the modem here
         //    means it was powered down (the settings screen can do that), so
         //    drop back to detection and reconfigure it when it returns.
         if(millis() - last_status > MODEM_STATUS_PERIOD_MS) {
@@ -662,8 +760,10 @@ static void modem_task(void *param)
             if(!modem_refresh_status()) {
                 Serial.println("[MODEM] stopped answering, waiting for it to come back");
                 status_set_call(MODEM_CALL_IDLE, NULL);
-                pending_sms_num = 0;
-                configured = false;
+                pending_sms_num    = 0;
+                clock_read_pending = true;
+                last_clock_try     = 0;
+                configured         = false;
             }
         }
 

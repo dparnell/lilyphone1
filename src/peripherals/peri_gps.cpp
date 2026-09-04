@@ -1,6 +1,7 @@
 
 #include "utilities.h"
 #include "peripheral.h"
+#include "system_clock.h"
 #include <TinyGPS++.h>
 
 /* clang-format off */
@@ -175,28 +176,13 @@ void displayInfo()
         Serial.print(F("."));
 
         if(!updated_time_from_gps) {
-            updated_time_from_gps = true;
-            struct tm t = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-            t.tm_year = gps_year - 1900;    // This is year-1900, so 121 = 2021
-            t.tm_mon = gps_month - 1;
-            t.tm_mday = gps_day;
-            t.tm_hour = gps_hour;
-            t.tm_min = gps_minute;
-            t.tm_sec = gps_second;
-            time_t timeSinceEpoch = mktime(&t);
-            struct timeval tv;
-            tv.tv_usec = 0;
-            if (timeSinceEpoch > 2082758399){
-                // overflowed!
-                tv.tv_sec = timeSinceEpoch - 2082758399;  // epoch time (seconds)
-            } else {
-            tv.tv_sec = timeSinceEpoch;  // epoch time (seconds)
+            // Satellite time is UTC. It goes through system_clock rather than
+            // mktime() because mktime reads its input as local time, and the
+            // modem may have put a real time zone in force by now.
+            if(system_clock_set_utc(CLOCK_SRC_GPS, gps_year, gps_month, gps_day,
+                                    gps_hour, gps_minute, gps_second)) {
+                updated_time_from_gps = true;
             }
-
-            Serial.print(F(" "));
-            Serial.print(tv.tv_sec);
-
-            settimeofday(&tv, NULL);
         }
     }
     else
