@@ -3863,24 +3863,74 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
 // How often the motor pulses while a call is ringing.
 #define RING_BUZZ_PERIOD_MS 2000
 
+/* Brings a message screen that is being looked at right now up to date.
+ *
+ * The list screens only rebuild in entry(), which does not run again while the
+ * screen stays on top - so a message arriving while the user is reading the
+ * conversation would not appear until they navigated away and back.
+ *
+ * `same_thread` says whether the change belongs to the conversation that is
+ * open; repainting it for a message from someone else would cost a panel
+ * refresh and change nothing on screen. */
+static void ui_sms_refresh_visible(bool same_thread)
+{
+    switch(scr_mgr_current_id()) {
+        case SCREEN13_ID:
+            // Any message reorders the conversation list or changes a marker.
+            if(scr13_list) {
+                scr13_populate();
+                ui_disp_full_refr();
+            }
+            break;
+
+        case SCREEN13_1_ID:
+            if(same_thread && scr13_1_cont) {
+                // Read, by definition - it is on screen in front of the user.
+                sms_thread_mark_read(ui_active_number);
+                scr13_1_populate();
+                ui_disp_full_refr();
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
 static void phone_event_timer_cb(lv_timer_t *t)
 {
     LV_UNUSED(t);
+
+    uint32_t revision_before  = ui_sms_revision;
+    bool     touched_open_thread = false;
 
     modem_sms_rx_t rx;
     while(ui_sms_poll_received(&rx)) {
         sms_add(rx.number, rx.text, rx.ts, SMS_DIR_IN, SMS_ST_OK, true);
         ui_sms_revision++;
         ui_notify_incoming_text();
+
+        if(phone_number_match(rx.number, ui_active_number)) touched_open_thread = true;
     }
 
     if(ui_send_watch_id != 0) {
         modem_send_state_t st = ui_sms_get_send_state(ui_send_watch_id);
         if(st == MODEM_SEND_OK || st == MODEM_SEND_FAILED) {
+            // Read the number before the watch is cleared: an open conversation
+            // showing "sending..." needs to be told how it turned out.
+            const sms_msg_t *sent = sms_get(ui_send_watch_idx);
+            if(sent && phone_number_match(sent->number, ui_active_number)) {
+                touched_open_thread = true;
+            }
+
             sms_set_status(ui_send_watch_idx, st == MODEM_SEND_OK ? SMS_ST_OK : SMS_ST_FAILED);
             ui_send_watch_id = 0;
             ui_sms_revision++;
         }
+    }
+
+    if(ui_sms_revision != revision_before) {
+        ui_sms_refresh_visible(touched_open_thread);
     }
 
     // Raise the call screen when a call starts ringing. Only on the transition:
