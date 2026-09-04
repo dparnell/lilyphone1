@@ -21,6 +21,7 @@
  * text -> LVGL's icons -> emoji. Montserrat is const, hence the copies. */
 static lv_font_t ui_font_symbols_14;
 static lv_font_t ui_font_symbols_18;
+static lv_font_t ui_font_symbols_react;
 
 lv_font_t ui_font_mono_14;
 lv_font_t ui_font_mono_15;
@@ -29,6 +30,7 @@ lv_font_t ui_font_mono_17;
 lv_font_t ui_font_mono_18;
 lv_font_t ui_font_mono_19;
 lv_font_t ui_font_mono_20;
+lv_font_t ui_font_react;
 
 static void font_with_symbols(lv_font_t *dst, const lv_font_t *src, const lv_font_t *symbols)
 {
@@ -53,4 +55,9 @@ void ui_fonts_init(void)
     font_with_symbols(&ui_font_mono_18, &Font_Mono_Bold_18, &ui_font_symbols_18);
     font_with_symbols(&ui_font_mono_19, &Font_Mono_Bold_19, &ui_font_symbols_18);
     font_with_symbols(&ui_font_mono_20, &Font_Mono_Bold_20, &ui_font_symbols_18);
+
+    // The reaction picker draws its glyphs large, so it gets a chain of its own
+    // ending in the bigger emoji font rather than the inline sized one.
+    font_with_symbols(&ui_font_symbols_react, &lv_font_montserrat_18, &Font_Emoji_28);
+    font_with_symbols(&ui_font_react, &Font_Mono_Bold_16, &ui_font_symbols_react);
 }

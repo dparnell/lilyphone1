@@ -31,6 +31,10 @@ extern lv_font_t ui_font_mono_18;
 extern lv_font_t ui_font_mono_19;
 extern lv_font_t ui_font_mono_20;
 
+/* For the reaction picker: the same idea, but ending in the larger emoji font
+ * so the choices are big enough to aim at. */
+extern lv_font_t ui_font_react;
+
 /* Must run before any label is created. */
 void ui_fonts_init(void);
 

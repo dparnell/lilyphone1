@@ -3370,6 +3370,9 @@ static scr_lifecycle_t screen13 = {
 /* How much of a message a reaction we send quotes back. A UCS2 segment holds
  * seventy characters and the wording takes a dozen of them. */
 #define SCR13_1_QUOTE_CHARS 50
+// The reaction picker's grid: three rows tall enough to aim a finger at.
+#define SCR13_1_REACT_ROWS  3
+#define SCR13_1_REACT_ROW_H 46
 
 static lv_obj_t *scr13_1_cont = NULL;
 static uint32_t  scr13_1_built_revision = 0;
@@ -3513,7 +3516,7 @@ static void scr13_1_bubble_event(lv_event_t *e)
     scr13_1_delete_target = idx;
 
     lv_obj_t *mbox = lv_msgbox_create(NULL, "React", preview, scr13_1_react_map, false);
-    lv_obj_set_width(mbox, lv_pct(92));
+    lv_obj_set_width(mbox, lv_pct(96));
     lv_obj_set_style_bg_color(mbox, DECKPRO_COLOR_BG, LV_PART_MAIN);
     lv_obj_set_style_text_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_obj_set_style_border_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
@@ -3525,6 +3528,19 @@ static void scr13_1_bubble_event(lv_event_t *e)
     // The default modal backdrop is half-transparent black, which on a 1bpp
     // panel dithers into noise.
     lv_obj_set_style_bg_opa(lv_obj_get_parent(mbox), LV_OPA_TRANSP, LV_PART_MAIN);
+
+    /* lv_msgbox sizes its button matrix for a single row - the height it picks
+     * is one line plus a margin - so a map with three rows in it ends up a
+     * third of a row tall per button. Size it for the rows it actually has, and
+     * give it the chain with the big emoji on the end. */
+    lv_obj_t *btns = lv_msgbox_get_btns(mbox);
+    if(btns) {
+        lv_obj_set_size(btns, lv_pct(100), SCR13_1_REACT_ROWS * SCR13_1_REACT_ROW_H);
+        lv_obj_set_style_text_font(btns, &ui_font_react, LV_PART_ITEMS);
+        lv_obj_set_style_pad_all(btns, 3, LV_PART_MAIN);
+        lv_obj_set_style_pad_row(btns, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_column(btns, 4, LV_PART_MAIN);
+    }
 
     lv_obj_add_event_cb(mbox, scr13_1_react_choice_event, LV_EVENT_VALUE_CHANGED, NULL);
     ui_disp_full_refr();

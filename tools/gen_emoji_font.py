@@ -119,11 +119,18 @@ def pack(rows):
 
 
 def main():
-    if len(sys.argv) != 5:
+    if len(sys.argv) not in (5, 6):
         print(__doc__)
         return 1
 
     ttf_path, size, out_path, name = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+
+    # An optional comma separated list of hex code points, for building a small
+    # font of just a few glyphs at a larger size - the reaction picker wants its
+    # six big, and does not need the other 1300.
+    only = None
+    if len(sys.argv) > 5:
+        only = set(int(x, 16) for x in sys.argv[5].split(","))
 
     font = ImageFont.truetype(ttf_path, size)
     try:
@@ -132,11 +139,14 @@ def main():
         pass
     have = covered(ttf_path)
 
-    wanted = []
-    for lo, hi in EMOJI_RANGES:
-        wanted.extend(cp for cp in range(lo, hi + 1) if cp in have)
-    wanted.extend(cp for cp in sorted(ZERO_WIDTH) if cp not in wanted)
-    wanted = sorted(set(wanted))
+    if only is not None:
+        wanted = sorted(cp for cp in only if cp in have)
+    else:
+        wanted = []
+        for lo, hi in EMOJI_RANGES:
+            wanted.extend(cp for cp in range(lo, hi + 1) if cp in have)
+        wanted.extend(cp for cp in sorted(ZERO_WIDTH) if cp not in wanted)
+        wanted = sorted(set(wanted))
 
     bitmap = bytearray()
     glyphs = [(0, 0, 0, 0, 0, 0)]  # index 0 is the reserved "not found" entry
