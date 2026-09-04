@@ -88,6 +88,7 @@ enum{
 typedef struct _ui_setting
 {
     const char *name;
+    const char *icon; // LV_SYMBOL_*, or NULL for a row that has no apt glyph
     int type;
     void (*set_cb)(bool);
     bool (*get_cb)(void);

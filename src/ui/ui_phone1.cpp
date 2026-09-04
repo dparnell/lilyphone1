@@ -1,6 +1,7 @@
 
 #include "ui_phone1.h"
 #include "assets.h"
+#include "ui_fonts.h"
 #include "stdio.h"
 #include "ui_phone1_port.h"
 #include "system_clock.h"
@@ -10,19 +11,22 @@
 #define SETTING_PAGE_MAX_ITEM 7
 #define GET_BUFF_LEN(a) sizeof(a)/sizeof(a[0])
 
-#define FONT_BOLD_SIZE_14 &Font_Mono_Bold_14
-#define FONT_BOLD_SIZE_15 &Font_Mono_Bold_15
-#define FONT_BOLD_SIZE_16 &Font_Mono_Bold_16
-#define FONT_BOLD_SIZE_17 &Font_Mono_Bold_17
-#define FONT_BOLD_SIZE_18 &Font_Mono_Bold_18
-#define FONT_BOLD_SIZE_19 &Font_Mono_Bold_19
+/* The ui_font_mono_* wrappers, not Font_Mono_Bold_* directly: the raw fonts
+ * have no icon glyphs and draw a placeholder box for any LV_SYMBOL_*. */
+#define FONT_BOLD_SIZE_14 &ui_font_mono_14
+#define FONT_BOLD_SIZE_15 &ui_font_mono_15
+#define FONT_BOLD_SIZE_16 &ui_font_mono_16
+#define FONT_BOLD_SIZE_17 &ui_font_mono_17
+#define FONT_BOLD_SIZE_18 &ui_font_mono_18
+#define FONT_BOLD_SIZE_19 &ui_font_mono_19
+#define FONT_BOLD_SIZE_20 &ui_font_mono_20
 
-#define FONT_BOLD_MONO_SIZE_14 &Font_Mono_Bold_14
-#define FONT_BOLD_MONO_SIZE_15 &Font_Mono_Bold_15
-#define FONT_BOLD_MONO_SIZE_16 &Font_Mono_Bold_16
-#define FONT_BOLD_MONO_SIZE_17 &Font_Mono_Bold_17
-#define FONT_BOLD_MONO_SIZE_18 &Font_Mono_Bold_18
-#define FONT_BOLD_MONO_SIZE_19 &Font_Mono_Bold_19
+#define FONT_BOLD_MONO_SIZE_14 &ui_font_mono_14
+#define FONT_BOLD_MONO_SIZE_15 &ui_font_mono_15
+#define FONT_BOLD_MONO_SIZE_16 &ui_font_mono_16
+#define FONT_BOLD_MONO_SIZE_17 &ui_font_mono_17
+#define FONT_BOLD_MONO_SIZE_18 &ui_font_mono_18
+#define FONT_BOLD_MONO_SIZE_19 &ui_font_mono_19
 
 #define GLOBAL_BUF_LEN 30
 static char global_buf[GLOBAL_BUF_LEN];
@@ -452,7 +456,7 @@ static void create0(lv_obj_t *parent)
     menu_taskbar_time = lv_label_create(menu_taskbar);
     lv_obj_set_style_border_width(menu_taskbar_time, 0, 0);
     lv_label_set_text(menu_taskbar_time, "XX:XX");
-    lv_obj_set_style_text_font(menu_taskbar_time, &Font_Mono_Bold_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(menu_taskbar_time, FONT_BOLD_SIZE_14, LV_PART_MAIN);
     lv_obj_align(menu_taskbar_time, LV_ALIGN_LEFT_MID, 10, 0);
 
     lv_obj_t *status_parent = lv_obj_create(menu_taskbar);
@@ -498,7 +502,7 @@ static void create0(lv_obj_t *parent)
     menu_taskbar_battery = lv_label_create(status_parent);
     
     menu_taskbar_battery_percent = lv_label_create(status_parent);
-    lv_obj_set_style_text_font(menu_taskbar_battery_percent, &Font_Mono_Bold_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(menu_taskbar_battery_percent, FONT_BOLD_SIZE_14, LV_PART_MAIN);
 
     //
     page_num = MENU_BTN_NUM / 9;
@@ -1143,7 +1147,7 @@ static void create2_2(lv_obj_t *parent)
     lv_obj_t *info = lv_label_create(parent);
     lv_obj_set_width(info, LV_HOR_RES * 0.9);
     lv_obj_set_style_text_color(info, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_text_font(info, &Font_Mono_Bold_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(info, FONT_BOLD_SIZE_14, LV_PART_MAIN);
     lv_obj_set_style_text_align(info, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(info, LV_LABEL_LONG_WRAP);
 
@@ -1197,15 +1201,19 @@ static lv_obj_t *setting_page;
 static int setting_num = 0;
 static int setting_page_num = 0;
 static int setting_curr_page = 0;
+/* The four power switches share one glyph deliberately: they are the same kind
+ * of control, and picking a different near-miss icon for each would read as
+ * four unrelated settings. Rows with no apt glyph are better left bare than
+ * given a misleading one. */
 static ui_setting_handle setting_handle_list[] = {
-    {.name = "- Time",   .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_1_ID},
-    {.name = "Keypad Backlight", .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_keypad_light, .get_cb = ui_setting_get_keypad_light},
-    {.name = "Motor Status",     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
-    {.name = "Power GPS",        .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},
-    {.name = "Power Lora",       .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_lora_status,  .get_cb = ui_setting_get_lora_status},
-    {.name = "Power Gyro",       .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gyro_status,  .get_cb = ui_setting_get_gyro_status},
-    {.name = "Power A7682",      .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_a7682_status, .get_cb = ui_setting_get_a7682_status},
-    {.name = "- About System",   .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_2_ID},
+    {.name = "Time",             .icon = LV_SYMBOL_REFRESH,  .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_1_ID},
+    {.name = "Keypad Backlight", .icon = LV_SYMBOL_KEYBOARD, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_keypad_light, .get_cb = ui_setting_get_keypad_light},
+    {.name = "Motor Status",     .icon = LV_SYMBOL_BELL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
+    {.name = "Power GPS",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},
+    {.name = "Power Lora",       .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_lora_status,  .get_cb = ui_setting_get_lora_status},
+    {.name = "Power Gyro",       .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gyro_status,  .get_cb = ui_setting_get_gyro_status},
+    {.name = "Power A7682",      .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_a7682_status, .get_cb = ui_setting_get_a7682_status},
+    {.name = "About System",     .icon = LV_SYMBOL_FILE,     .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_2_ID},
 };
 
 static void setting_item_create(int curr_apge);
@@ -1282,14 +1290,14 @@ static void setting_item_create(int curr_apge)
         switch (h->type)
         {
         case UI_SETTING_TYPE_SW:
-            h->obj = lv_list_add_btn(setting_list, NULL, h->name);
+            h->obj = lv_list_add_btn(setting_list, h->icon, h->name);
             h->st = lv_label_create(h->obj);
             lv_obj_set_style_text_font(h->st, FONT_BOLD_SIZE_15, LV_PART_MAIN);
             lv_obj_align(h->st, LV_ALIGN_RIGHT_MID, 0, 0);
             lv_label_set_text_fmt(h->st, "%s", (h->get_cb() ? "ON" : "OFF"));
             break;
         case UI_SETTING_TYPE_SUB:
-            h->obj = lv_list_add_btn(setting_list, NULL, h->name);
+            h->obj = lv_list_add_btn(setting_list, h->icon, h->name);
             break;
         default:
             break;
@@ -1886,7 +1894,7 @@ static void test_item_create(int curr_apge)
         h->st = lv_label_create(h->obj);
         lv_obj_set_style_text_font(h->st, FONT_BOLD_SIZE_15, LV_PART_MAIN);
         lv_obj_align(h->st, LV_ALIGN_RIGHT_MID, 0, 0);
-        lv_label_set_text_fmt(h->st, "%s", (h->cb(h->peri_id) ? "PASS" : "----"));
+        lv_label_set_text_fmt(h->st, "%s", (h->cb(h->peri_id) ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE));
         // style
         lv_obj_set_style_text_font(h->obj, FONT_BOLD_SIZE_15, LV_PART_MAIN);
         lv_obj_set_style_bg_color(h->obj, DECKPRO_COLOR_BG, LV_PART_MAIN);
@@ -2517,7 +2525,7 @@ static void create8(lv_obj_t *parent)
     lv_textarea_set_max_length(scr8_number_ta, CONTACT_NUMBER_LEN - 1);
     lv_obj_set_width(scr8_number_ta, lv_pct(94));
     lv_obj_align(scr8_number_ta, LV_ALIGN_TOP_MID, 0, 34);
-    lv_obj_set_style_text_font(scr8_number_ta, &Font_Mono_Bold_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(scr8_number_ta, FONT_BOLD_SIZE_20, LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scr8_number_ta, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_line_space(scr8_number_ta, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
@@ -2660,7 +2668,7 @@ static void create8_1(lv_obj_t *parent)
 
     lv_obj_t *who = lv_label_create(parent);
     lv_obj_set_width(who, lv_pct(92));
-    lv_obj_set_style_text_font(who, &Font_Mono_Bold_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(who, FONT_BOLD_SIZE_20, LV_PART_MAIN);
     lv_obj_set_style_text_color(who, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_obj_set_style_text_align(who, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_long_mode(who, LV_LABEL_LONG_WRAP);
@@ -2880,7 +2888,7 @@ static void create12_1(lv_obj_t *parent)
 
     lv_obj_t *name_label = lv_label_create(parent);
     lv_obj_set_width(name_label, lv_pct(92));
-    lv_obj_set_style_text_font(name_label, &Font_Mono_Bold_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(name_label, FONT_BOLD_SIZE_20, LV_PART_MAIN);
     lv_obj_set_style_text_color(name_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_long_mode(name_label, LV_LABEL_LONG_WRAP);
@@ -3888,6 +3896,9 @@ static void phone_event_timer_cb(lv_timer_t *t)
 
 void ui_phone1_entry(void)
 {
+    // Before any label exists: the wrappers are zeroed until this runs.
+    ui_fonts_init();
+
     lv_disp_t *disp = lv_disp_get_default();
     disp->theme = lv_theme_mono_init(disp, false, LV_FONT_DEFAULT);
 
