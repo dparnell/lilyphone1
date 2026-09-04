@@ -697,17 +697,30 @@ static void ascii_fold(const char *in, char *out, size_t out_len)
  * goes out as hex. */
 static bool sms_send_body(const char *number, const char *text, bool ucs2)
 {
-    char cmd[CONTACT_NUMBER_LEN + 16];
+    // Room for a destination number written as UCS2 hex, four times its length.
+    char cmd[CONTACT_NUMBER_LEN * 4 + 24];
     char line[MODEM_LINE_MAX];
     char hex[SMS_HEX_BODY_MAX];
+    char number_hex[CONTACT_NUMBER_LEN * 4 + 4];
 
     if(ucs2) {
-        if(!utf8_to_ucs2_hex(text, hex, sizeof(hex))) {
+        if(!utf8_to_ucs2_hex(text, hex, sizeof(hex)) ||
+           !utf8_to_ucs2_hex(number, number_hex, sizeof(number_hex))) {
             Serial.println("[MODEM] cannot encode message as UCS2");
+            return false;
+        }
+
+        /* The module will not accept UCS2 data while the character set is GSM:
+         * it answers +CMS ERROR: 305, invalid text mode parameter. Under
+         * CSCS="UCS2" every string parameter is hex - the destination number
+         * included, which is why that is encoded too. */
+        if(!modem_exec("AT+CSCS=\"UCS2\"", NULL, 0, 2000)) {
+            Serial.println("[MODEM] modem would not switch to the UCS2 character set");
             return false;
         }
         if(!modem_exec("AT+CSMP=17,167,0,8", NULL, 0, 2000)) {
             Serial.println("[MODEM] modem would not take a UCS2 coding scheme");
+            modem_exec("AT+CSCS=\"GSM\"", NULL, 0, 2000);
             return false;
         }
     }
@@ -723,7 +736,7 @@ static bool sms_send_body(const char *number, const char *text, bool ucs2)
     /* Terminated with CR alone: the LF that modem_write_line would add lands
      * after the modem has switched to accepting the message body, where it
      * would become the first character of the message. */
-    snprintf(cmd, sizeof(cmd), "AT+CMGS=\"%s\"", number);
+    snprintf(cmd, sizeof(cmd), "AT+CMGS=\"%s\"", ucs2 ? number_hex : number);
     SerialAT.print(cmd);
     SerialAT.print("\r");
 
@@ -778,9 +791,13 @@ static bool sms_send_body(const char *number, const char *text, bool ucs2)
         }
     }
 
-    // Whatever happened, put the coding scheme back so the next message is not
-    // sent as UCS2 by accident.
-    if(ucs2) modem_exec("AT+CSMP=17,167,0,0", NULL, 0, 2000);
+    /* Whatever happened, put the character set and coding scheme back. Leaving
+     * CSCS at UCS2 would hex-encode the strings in every later reply, so this
+     * matters more than the coding scheme does. */
+    if(ucs2) {
+        modem_exec("AT+CSCS=\"GSM\"", NULL, 0, 2000);
+        modem_exec("AT+CSMP=17,167,0,0", NULL, 0, 2000);
+    }
 
     Serial.printf("[MODEM] %s send %s\n", ucs2 ? "UCS2" : "GSM-7",
                   sent ? "accepted by the network" : "failed");

@@ -53,7 +53,11 @@ In text mode with `CSCS="GSM"`, a message whose data coding scheme is UCS2 arriv
 
 Storage is therefore UTF-8 and `SMS_TEXT_LEN` (321) is sized for decoded multi-byte text, while `SMS_COMPOSE_MAX` (160) is what the composer allows for a single outgoing segment.
 
-Outgoing messages are GSM-7 by default. `sms_send()` switches a single message to UCS2 (`AT+CSMP` with dcs 8, body written as hex) when `text_is_gsm7()` says the text needs it, and restores the default afterwards - which is what lets a reaction carry the curly quotes the convention is built from.
+Outgoing messages are GSM-7 by default. `sms_send()` switches a single message to UCS2 when `text_is_gsm7()` says the text needs it - which is what lets a reaction carry the curly quotes the convention is built from - and restores the defaults afterwards.
+
+Sending UCS2 needs **both** `AT+CSCS="UCS2"` and `AT+CSMP` with dcs 8. With the character set left at GSM the module answers `+CMS ERROR: 305` (invalid text mode parameter) to the `AT+CMGS` that follows. Under `CSCS="UCS2"` *every* string parameter is hex, so the destination number is encoded too, and the character set must be put back or later replies come back hex as well. Two other things the send path depends on: `AT+CMGS` is terminated with **CR alone** (a trailing LF lands after the modem has switched to accepting the body, and becomes part of the message), and `AT+CMGF=1` is reissued before every send, since in PDU mode `AT+CMGS` takes a length instead of a quoted number and no prompt would ever arrive.
+
+If UCS2 fails anyway, the message is retried as GSM-7 with the punctuation folded to ASCII rather than dropped.
 
 **Reactions are ordinary messages.** SMS has no reaction protocol: the reacting phone sends a sentence quoting the message it refers to (`Liked "..."`, or an emoji then ` to "..."`). `ui_reaction_parse()` recognises those, and `scr13_1_populate()` does a pre-pass that pins each one to the nearest earlier message its quote matches, drawing it as a badge on that bubble instead of as a message of its own. The quote is matched as a *prefix* with any trailing ellipsis stripped, because a long message is only quoted as far as the sending phone chose to. A reaction whose target is not in the window falls back to being drawn as an annotation. Tapping a bubble offers the same six reactions back, sent as the same kind of sentence.
 
