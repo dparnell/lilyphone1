@@ -12,6 +12,7 @@
 #include "phone_store.h"
 #include "system_clock.h"
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 
 Preferences preferences;
 
@@ -27,10 +28,34 @@ GxEPD2_BW<GxEPD2_310_GDEQ031T10, GxEPD2_310_GDEQ031T10::HEIGHT> display(GxEPD2_3
 uint8_t *decodebuffer = NULL;
 lv_timer_t *flush_timer = NULL;
 int disp_refr_mode = DISP_REFR_MODE_PART;
+
+// One flashing full refresh every this many "the whole screen changed"
+// requests; everything in between is a fast partial update.
+#define DISP_FULL_REFRESH_EVERY 8
+#define DISP_HIBERNATE_DELAY_MS 4000
+
+// Start at the threshold so the first screen after boot gets a clean full pass.
+static int         changes_since_full = DISP_FULL_REFRESH_EVERY;
+static lv_timer_t *hibernate_timer    = NULL;
+static bool        panel_hibernating  = true;
 const char HelloWorld[] = "LilyPhone1";
 
 bool peri_init_st[E_PERI_NUM_MAX] = {0};
 
+
+/* Prefers internal RAM: LVGL renders pixel by pixel into the draw buffer and
+ * GxEPD2 reads the packed one byte by byte, and PSRAM is several times slower
+ * for that kind of access. Falls back to PSRAM rather than failing to boot. */
+static void *disp_buf_alloc(size_t bytes)
+{
+    void *p = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if(p == NULL) {
+        Serial.printf("[DISP] %u bytes did not fit in internal RAM, using PSRAM\n", (unsigned)bytes);
+        p = ps_malloc(bytes);
+    }
+    if(p) memset(p, 0, bytes);
+    return p;
+}
 
 static bool ink_screen_init()
 {
@@ -57,6 +82,43 @@ static bool ink_screen_init()
     return true;
 }
 
+/* Powering the panel down after every update means the next one pays a wake-up
+ * and re-init before it can draw. Hibernating a few seconds after the last
+ * update keeps a burst of screens fast while still parking the panel when the
+ * user stops interacting. */
+static void hibernate_timer_cb(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    if(!panel_hibernating) {
+        display.hibernate();
+        panel_hibernating = true;
+    }
+    lv_timer_del(hibernate_timer);
+    hibernate_timer = NULL;
+}
+
+static void hibernate_schedule(void)
+{
+    if(hibernate_timer == NULL) {
+        hibernate_timer = lv_timer_create(hibernate_timer_cb, DISP_HIBERNATE_DELAY_MS, NULL);
+    } else {
+        lv_timer_reset(hibernate_timer);
+    }
+}
+
+void disp_hibernate_now(void)
+{
+    if(hibernate_timer) {
+        lv_timer_del(hibernate_timer);
+        hibernate_timer = NULL;
+    }
+    if(!panel_hibernating) {
+        display.hibernate();
+        panel_hibernating = true;
+    }
+}
+
 static void flush_timer_cb(lv_timer_t *t)
 {
     static int idx = 0;
@@ -65,20 +127,36 @@ static void flush_timer_cb(lv_timer_t *t)
         lv_coord_t w = LV_HOR_RES;
         lv_coord_t h = LV_VER_RES;
 
-        if(disp_refr_mode == DISP_REFR_MODE_PART) {
-            display.setPartialWindow(0, 0, w, h);
-        } else if(disp_refr_mode == DISP_REFR_MODE_FULL){
-            display.setFullWindow();
+        /* A full window update is the flashing one and costs seconds, against a
+         * few hundred milliseconds for a partial. Screens ask for a full
+         * refresh on every transition, which is far more often than the panel
+         * needs it, so treat the request as "the whole screen changed" and only
+         * actually flash periodically to clear accumulated ghosting. */
+        bool full = false;
+        if(disp_refr_mode == DISP_REFR_MODE_FULL) {
+            if(++changes_since_full >= DISP_FULL_REFRESH_EVERY) {
+                changes_since_full = 0;
+                full = true;
+            }
         }
+
+        if(full) {
+            display.setFullWindow();
+        } else {
+            display.setPartialWindow(0, 0, w, h);
+        }
+
+        panel_hibernating = false;
 
         display.firstPage();
         do {
             display.drawInvertedBitmap(0, 0, decodebuffer, w, h - 3, GxEPD_BLACK);
         }
         while (display.nextPage());
-        display.hibernate();
-        
-        Serial.printf("flush_timer_cb:%d, %s\n", idx++, (disp_refr_mode == 0 ?"full":"part"));
+
+        hibernate_schedule();
+
+        Serial.printf("flush_timer_cb:%d, %s\n", idx++, (full ? "full" : "part"));
 
         disp_refr_mode = DISP_REFR_MODE_PART;
         lv_timer_pause(flush_timer);
@@ -161,9 +239,9 @@ static void touchpad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
 
     uint8_t touched = touch.getPoint(&last_x, &last_y, 1);
     if(touched) {
+        // Touch is sampled every 10ms; logging every sample floods the USB CDC
+        // link and can stall the LVGL task waiting on it.
         data->state = LV_INDEV_STATE_PR;
-
-        Serial.printf("x = %d, y = %d\n", last_x, last_y);
     } else {
         data->state = LV_INDEV_STATE_REL;
     }
@@ -177,10 +255,16 @@ static void lvgl_init(void)
     lv_init();
 
     static lv_disp_draw_buf_t draw_buf_dsc_1;
-    lv_color_t *buf_1 = (lv_color_t *)ps_calloc(sizeof(lv_color_t), DISP_BUF_SIZE);
-    lv_color_t *buf_2 = (lv_color_t *)ps_calloc(sizeof(lv_color_t), DISP_BUF_SIZE);
-    lv_disp_draw_buf_init(&draw_buf_dsc_1, buf_1, buf_2, LCD_HOR_SIZE * LCD_VER_SIZE);
-    decodebuffer = (uint8_t *)ps_calloc(sizeof(uint8_t), DISP_BUF_SIZE);
+
+    /* One buffer, not two: the panel push happens synchronously in the LVGL
+     * task, so there is never a second frame being rendered alongside it and
+     * the second buffer only cost memory. */
+    lv_color_t *buf_1 = (lv_color_t *)disp_buf_alloc(sizeof(lv_color_t) * DISP_BUF_SIZE);
+    lv_disp_draw_buf_init(&draw_buf_dsc_1, buf_1, NULL, LCD_HOR_SIZE * LCD_VER_SIZE);
+
+    // Packed 1bpp, so an eighth of the pixel count. The old size was the pixel
+    // count itself - eight times more than drawInvertedBitmap ever reads.
+    decodebuffer = (uint8_t *)disp_buf_alloc(DISP_BUF_SIZE / 8 + 64);
     // lv_disp_draw_buf_init(&draw_buf, lv_disp_buf_p, NULL, DISP_BUF_SIZE);
 
     static lv_disp_drv_t disp_drv;

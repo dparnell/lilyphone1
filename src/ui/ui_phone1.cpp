@@ -3647,6 +3647,10 @@ static void create11(lv_obj_t *parent)
     gpio_deep_sleep_hold_en();
 
     
+    // The panel is normally parked a few seconds after the last update, which
+    // never arrives once the CPU is asleep, so park it here.
+    ui_disp_hibernate();
+
     // esp_sleep_enable_ext0_wakeup((gpio_num_t)ENCODER_KEY, 0);                            
     esp_sleep_enable_ext1_wakeup((1UL << BOARD_BOOT_PIN), ESP_EXT1_WAKEUP_ANY_LOW);   // Hibernate using user keys
     esp_deep_sleep_start();

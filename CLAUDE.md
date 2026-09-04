@@ -43,7 +43,15 @@ Message bodies additionally carry the sender's own line breaks, so anything rend
 
 ### Display: everything is e-paper
 
-`src/main.cpp` renders LVGL into a 1bpp buffer and pushes whole frames to a GxEPD2 panel. `disp_drv.full_refresh = 1`, so *any* invalidation repaints the entire panel — a once-per-second label update is a once-per-second full refresh. Periodic UI updates are deliberately slowed to a few seconds (see the in-call timer). `disp_full_refr()` / `ui_disp_full_refr()` request a full (rather than partial) waveform for the next flush and are called on screen transitions to clear ghosting.
+`src/main.cpp` renders LVGL into a 1bpp buffer and pushes whole frames to a GxEPD2 panel. `disp_drv.full_refresh = 1`, so *any* invalidation repaints the entire panel — a once-per-second label update is a once-per-second repaint. Periodic UI updates are deliberately slowed to a few seconds (see the in-call timer).
+
+Two different costs are easy to confuse. A **partial** window update takes a few hundred milliseconds; a **full** window update is the flashing one and takes seconds. `disp_full_refr()` / `ui_disp_full_refr()` mean "the whole screen changed", not "flash the panel" — screens call it on every transition, which is far more often than the panel needs clearing. The driver honours only every `DISP_FULL_REFRESH_EVERY`th request and does a partial update otherwise.
+
+The panel is parked (`hibernate`) a few seconds after the last update rather than after every one, since waking it costs a re-init. Anything that stops the LVGL task from running — deep sleep, power off — must call `disp_hibernate_now()` first, because the deferred timer will never fire.
+
+The draw buffer and the packed 1bpp buffer are allocated with `disp_buf_alloc()`, which prefers internal RAM and falls back to PSRAM. PSRAM is several times slower for the pixel-by-pixel access both see, and with `full_refresh` that cost is paid over the whole screen every time. There is one draw buffer, not two: the panel push is synchronous in the LVGL task, so a second buffer would never be rendered into.
+
+The flush blocks the LVGL task for the whole panel update, so a tap that starts and ends inside that window is never sampled and is lost. Sampling touch from its own task (the CST328 has an INT line on `BOARD_TOUCH_INT`) would fix it, at the cost of sharing `Wire` with the keypad read across tasks.
 
 ### Screen manager
 

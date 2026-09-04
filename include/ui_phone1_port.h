@@ -34,6 +34,9 @@ extern "C" {
  *                              GLOBAL PROTOTYPES
  * *******************************************************************************/
 void ui_disp_full_refr(void);
+/* Parks the e-paper panel immediately. The driver otherwise does it a few
+ * seconds after the last update, which is too late before a deep sleep. */
+void ui_disp_hibernate(void);
 
 // [ screen 1 ] --- lora
 float ui_lora_get_freq(void);

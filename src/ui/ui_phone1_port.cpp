@@ -32,6 +32,11 @@ void ui_disp_full_refr(void)
 {
     disp_full_refr();
 }
+
+void ui_disp_hibernate(void)
+{
+    disp_hibernate_now();
+}
 //************************************[ screen 0 ]****************************************** menu
 //************************************[ screen 1 ]****************************************** lora
 
@@ -425,6 +430,7 @@ void ui_modem_at(const char *cmd)
 
 void ui_shutdown_on(void)
 {
+    disp_hibernate_now();
     PPM.shutdown();
     Serial.println("Shutdown .....");
 }

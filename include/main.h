@@ -58,6 +58,7 @@ union flush_buf_pixel
 /*********************************************************************************
  *                              GLOBAL PROTOTYPES
  * *******************************************************************************/
-void disp_full_refr(void); // Next global refresh
+void disp_full_refr(void); // The whole screen changed; the driver decides when to flash
+void disp_hibernate_now(void); // Park the panel before deep sleep or power off
 
 #endif
