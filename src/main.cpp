@@ -286,12 +286,10 @@ static void a7682_task(void *param)
 
 static bool A7682E_init(void)
 {
-    Serial.println("Place your board outside to catch satelite signal");
-
     // Set module baud rate and UART pins
     SerialAT.begin(115200, SERIAL_8N1, BOARD_A7682E_TXD, BOARD_A7682E_RXD);
 
-    Serial.println("Start modem...");
+    Serial.println("Powering up modem...");
 
     // power on
     digitalWrite(BOARD_A7682E_PWRKEY, LOW);
@@ -301,6 +299,7 @@ static bool A7682E_init(void)
     digitalWrite(BOARD_A7682E_PWRKEY, LOW);
     delay(10);
 
+    Serial.print("Waiting for modem to wake up");
     int retry_cnt = 5;
     int retry = 0;
     while (!modem.testAT(1000)) {
@@ -312,17 +311,22 @@ static bool A7682E_init(void)
             delay(1000);
             digitalWrite(BOARD_A7682E_PWRKEY, LOW);
 
-            Serial.println("[A7682E] Init Fail");
+            Serial.println("\n[A7682E] Init Fail");
             break;
         }
     }
     
     Serial.println();
+    bool alive = retry < retry_cnt;
+    if(alive) {
+        Serial.println("Modem successfully initialized :)");
+    }
+
     delay(200);
 
     xTaskCreate(a7682_task, "a7682_handle", 1024 * 3, NULL, A7682E_PRIORITY, &a7682_handle);
 
-    return (retry < retry_cnt);
+    return alive;
 }
 
 void disp_full_refr(void)
@@ -381,17 +385,17 @@ void setup() {
           nDevices++;
           if(address == BOARD_I2C_ADDR_TOUCH){
               // flag_Touch_init = true;
-              Serial.printf("[0x%x] TOUCH find!\n", address);
+              Serial.printf("[0x%x] TOUCH found!\n", address);
           } else if (address == BOARD_I2C_ADDR_LTR_553ALS) {
-              Serial.printf("[0x%x] LTR_553ALS find!\n", address);
+              Serial.printf("[0x%x] LTR_553ALS found!\n", address);
           } else if (address == BOARD_I2C_ADDR_GYROSCOPDE) {
-              Serial.printf("[0x%x] GYROSCOPDE find!\n", address);
+              Serial.printf("[0x%x] GYROSCOPDE found!\n", address);
           } else if (address == BOARD_I2C_ADDR_KEYBOARD) {
-              Serial.printf("[0x%x] KEYBOARD find!\n", address);
+              Serial.printf("[0x%x] KEYBOARD found!\n", address);
           } else if (address == BOARD_I2C_ADDR_BQ27220) {
-              Serial.printf("[0x%x] BQ27220 find!\n", address);
+              Serial.printf("[0x%x] BQ27220 found!\n", address);
           } else if (address == BOARD_I2C_ADDR_BQ25896) {
-              Serial.printf("[0x%x] BQ25896 find!\n", address);
+              Serial.printf("[0x%x] BQ25896 found!\n", address);
           }
       }
   }

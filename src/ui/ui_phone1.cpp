@@ -1184,16 +1184,75 @@ static void scr4_1_btn_event_cb(lv_event_t * e)
     }
 }
 
+void readAllFromModem() {
+    while(SerialAT.available()) {
+        Serial.write(SerialAT.read());
+    }
+}
+
 static void create4_1(lv_obj_t *parent) 
 {
-
-
     // back
     scr_back_btn_create(parent, "Wifi Config", scr4_1_btn_event_cb);
 }
 
 static void entry4_1(void) 
 {
+    readAllFromModem();
+    Serial.println("\nMake sure the modem is in command mode...");
+    for(int i=0; i<3; i++) {
+        Serial.print("+");
+        readAllFromModem();
+        delay(100);
+    }    
+
+    Serial.println("Enter data mode...");
+    SerialAT.println("AT+CGDATA=\"\",1");
+    delay(100);
+    readAllFromModem();
+
+    Serial.println("Fetch address detials...");
+    SerialAT.println("AT+CGPADDR");
+    delay(100);
+    readAllFromModem();
+
+    /*
+    Serial.println("\nScan wifi networks...");
+    SerialAT.println("AT+CWSTASCANSYN=1");
+    delay(100);
+    readAllFromModem();
+    */
+    
+    Serial.println("\nDisabling wifi...");
+    SerialAT.println("AT+CWMAP=0");
+    delay(100);
+    readAllFromModem();
+
+    Serial.println("\nSetting ssid...");
+    SerialAT.println("AT+CWSSID=lilyphone1");
+    delay(100);
+    readAllFromModem();
+
+    Serial.println("\nConfiguring wifi...");
+    SerialAT.println("AT+CWAUTH=5,3,password");
+    delay(100);
+    readAllFromModem();
+
+    Serial.println("\nSetting wifi mode and channel...");
+    SerialAT.println("AT+CWMOCH=4,0");
+    delay(100);
+    readAllFromModem();
+
+    Serial.println("\nEnabling client isolation...");
+    SerialAT.println("AT+CWISO=1");
+    delay(100);
+    readAllFromModem();
+
+    Serial.println("\nEnabling wifi...");
+    SerialAT.println("AT+CWMAP=1");
+    delay(100);
+    readAllFromModem();
+
     ui_disp_full_refr();
 }
 static void exit4_1(void) {
@@ -1281,18 +1340,32 @@ static void create4_2(lv_obj_t *parent)
 
     lv_obj_t *back4_label = scr_back_btn_create(parent, ("Wifi"), scr4_2_btn_event_cb);
 }
+extern TaskHandle_t a7682_handle;
+
 static void entry4_2(void) 
 {
+    SerialAT.println("\n\nATZ");
+    SerialAT.println("AT+CWSTASCANSYN=1");
     ui_disp_full_refr();
+    vTaskResume(a7682_handle);
+
+    /*
     wifi_scan_timer = lv_timer_create(wifi_scan_timer_event, 10000, NULL);
     lv_timer_ready(wifi_scan_timer);
+    */
 }
+
 static void exit4_2(void) {
     ui_disp_full_refr();
+    SerialAT.println("AT+CWSTASCANSYN=0");
+    vTaskSuspend(a7682_handle);
+
+    /*
     if(wifi_scan_timer) {
         lv_timer_del(wifi_scan_timer);
         wifi_scan_timer = NULL;
     }
+        */
 }
 
 static void destroy4_2(void) { }
