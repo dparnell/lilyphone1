@@ -8,12 +8,13 @@
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include "main.h"
 #include "peripheral.h"
+#include "modem_service.h"
+#include "phone_store.h"
 #include <Preferences.h>
 
 Preferences preferences;
 
 TinyGsm modem(SerialAT);
-TaskHandle_t a7682_handle;
 
 XPowersPPM PPM;
 BQ27220 bq27220;
@@ -267,23 +268,6 @@ static bool sd_care_init(void)
     return true;
 }
 
-static void a7682_task(void *param)
-{
-    vTaskSuspend(a7682_handle);
-    while (1)
-    {
-        while (SerialAT.available())
-        {
-            SerialMon.write(SerialAT.read());
-        }
-        while (SerialMon.available())
-        {
-            SerialAT.write(SerialMon.read());
-        }
-        delay(1);
-    }
-}
-
 static bool A7682E_init(void)
 {
     // Set module baud rate and UART pins
@@ -324,7 +308,9 @@ static bool A7682E_init(void)
 
     delay(200);
 
-    xTaskCreate(a7682_task, "a7682_handle", 1024 * 3, NULL, A7682E_PRIORITY, &a7682_handle);
+    // From here on the modem service task owns SerialAT; nothing else may read
+    // or write it, or the unsolicited RING and +CMTI notifications get eaten.
+    modem_service_init(alive);
 
     return alive;
 }
@@ -426,6 +412,8 @@ void setup() {
   peri_init_st[E_PERI_BHI260AP]   = BHI260AP_init();
   peri_init_st[E_PERI_LTR_553ALS] = LTR553_init();
   peri_init_st[E_PERI_A7682E]     = A7682E_init();
+
+  phone_store_init();
 
   lvgl_init();
 

@@ -10,6 +10,7 @@
 #include <TinyGPS++.h>
 #include "peripheral.h"
 #include "WiFi.h"
+#include "modem_service.h"
 #include <ctype.h>
 #include <TouchDrvCSTXXX.hpp>
 
@@ -334,32 +335,90 @@ const char * ui_battert_27220_get_percent_level(void)
 #endif
 
 
-//************************************[ screen 8 ]****************************************** A7682E
+//************************************[ screen 8 ]****************************************** telephony
 
-void ui_a7682_call(const char *number)
+void ui_phone_dial(const char *number)
 {
-    char buf[32];
-    lv_snprintf(buf, 32, "D%s;", number);
-    printf("[A7682E] at cmd: %s\n", buf);
-
-    modem.sendAT(buf);
-    delay(100);
+    Serial.printf("[PHONE] dialing %s\n", number);
+    modem_dial(number);
 }
 
-void ui_a7682_hang_up(void)
+void ui_phone_answer(void)
 {
-    modem.sendAT("+CHUP");
-    delay(100);
+    modem_answer();
 }
 
-void ui_a7682_loop_resume(void)
+void ui_phone_hang_up(void)
 {
-    vTaskResume(a7682_handle);
+    modem_hangup();
 }
 
-void ui_a7682_loop_suspend(void)
+modem_call_state_t ui_phone_get_call_state(void)
 {
-    vTaskSuspend(a7682_handle);
+    return modem_get_call_state();
+}
+
+void ui_phone_get_call_number(char *buf, int len)
+{
+    modem_get_call_number(buf, len);
+}
+
+uint32_t ui_phone_get_call_duration(void)
+{
+    return modem_get_call_duration();
+}
+
+bool ui_phone_is_registered(void)
+{
+    return modem_is_registered();
+}
+
+uint8_t ui_phone_get_signal(void)
+{
+    return modem_get_signal();
+}
+
+void ui_phone_get_operator(char *buf, int len)
+{
+    modem_get_operator(buf, len);
+}
+
+static void vibrate_off_cb(lv_timer_t *t)
+{
+    digitalWrite(BOARD_MOTOR_PIN, LOW);
+    lv_timer_del(t);
+}
+
+void ui_phone_vibrate(int ms)
+{
+    if(!default_motor_status) return;
+
+    digitalWrite(BOARD_MOTOR_PIN, HIGH);
+
+    lv_timer_t *t = lv_timer_create(vibrate_off_cb, ms, NULL);
+    lv_timer_set_repeat_count(t, 1);
+}
+
+//************************************[ screen 13 ]***************************************** messaging
+
+uint32_t ui_sms_send(const char *number, const char *text)
+{
+    return modem_send_sms(number, text);
+}
+
+modem_send_state_t ui_sms_get_send_state(uint32_t send_id)
+{
+    return modem_get_send_state(send_id);
+}
+
+bool ui_sms_poll_received(modem_sms_rx_t *out)
+{
+    return modem_poll_sms(out);
+}
+
+void ui_modem_at(const char *cmd)
+{
+    modem_request_at(cmd);
 }
 
 //************************************[ screen 9 ]****************************************** Input

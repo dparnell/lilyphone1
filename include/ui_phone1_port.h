@@ -9,6 +9,8 @@
 #include "peripheral.h"
 #include "ui_phone1.h"
 #include "utilities.h"
+#include "modem_service.h"
+#include "phone_store.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -118,11 +120,30 @@ void ui_input_set_keypay_flag(void);
 int ui_other_get_LTR(int *ch0, int *ch1, int *ps);
 int ui_other_get_gyro(float *gyro_x, float *gyro_y, float *gyro_z);
 
-// [ screen 8 ] --- A7682E
-void ui_a7682_call(const char *number);
-void ui_a7682_hang_up(void);
-void ui_a7682_loop_resume(void);
-void ui_a7682_loop_suspend(void);
+// [ screen 8 ] --- telephony
+/* Thin wrappers over the modem service so the UI keeps talking to one layer.
+ * All of them return immediately; the modem task does the work. */
+void ui_phone_dial(const char *number);
+void ui_phone_answer(void);
+void ui_phone_hang_up(void);
+modem_call_state_t ui_phone_get_call_state(void);
+void ui_phone_get_call_number(char *buf, int len);
+uint32_t ui_phone_get_call_duration(void);
+bool ui_phone_is_registered(void);
+uint8_t ui_phone_get_signal(void);
+void ui_phone_get_operator(char *buf, int len);
+/* Buzzes the motor for `ms` and releases it from a one-shot timer, so the
+ * caller never blocks the UI. Does nothing when the user turned the motor off
+ * in the settings. */
+void ui_phone_vibrate(int ms);
+
+// [ screen 13 ] --- messaging
+uint32_t ui_sms_send(const char *number, const char *text);
+modem_send_state_t ui_sms_get_send_state(uint32_t send_id);
+bool ui_sms_poll_received(modem_sms_rx_t *out);
+
+/* Queue a raw AT command on the modem task; the reply goes to the monitor. */
+void ui_modem_at(const char *cmd);
 
 // shutdown
 void ui_shutdown_on(void);

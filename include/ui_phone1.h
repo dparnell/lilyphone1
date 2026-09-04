@@ -9,6 +9,7 @@ extern "C" {
  * *******************************************************************************/
 #include "lvgl.h"
 #include "ui_scr_mrg.h"
+#include "phone_store.h"
 
 /*********************************************************************************
  *                                   MACROS
@@ -38,9 +39,23 @@ enum {
     SCREEN6_1_ID,
     SCREEN6_2_ID,
     SCREEN8_ID,   // dial screen
-    SCREEN8_1_ID, // call screen
+    SCREEN8_1_ID, // in-call screen
     SCREEN9_ID,   // shutdown
     SCREEN11_ID,  // sleep
+    SCREEN12_ID,   // contacts
+    SCREEN12_1_ID, // contact details
+    SCREEN12_2_ID, // contact editor
+    SCREEN13_ID,   // messages, one row per conversation
+    SCREEN13_1_ID, // conversation
+    SCREEN13_2_ID, // compose
+};
+
+/* Why the contacts list was opened. When it is a pick the list hands a number
+ * back to the screen underneath instead of opening the contact. */
+enum {
+    UI_PICK_NONE = 0,
+    UI_PICK_DIAL,
+    UI_PICK_COMPOSE,
 };
 
 typedef void (*ui_indev_read_cb)(int);
@@ -50,12 +65,15 @@ enum {
     TASKBAR_ID_CHARGE_FINISH,
     TASKBAR_ID_BATTERY_PERCENT,
     TASKBAR_ID_WIFI,
+    TASKBAR_ID_SIGNAL,
+    TASKBAR_ID_UNREAD,
     TASKBAR_ID_MAX,
 };
 
 struct menu_btn {
     uint16_t idx;
-    const void *icon;
+    const void *icon;   // bitmap icon, or NULL to fall back to `symbol`
+    const char *symbol; // LV_SYMBOL_* drawn in its place
     const char *name;
     lv_coord_t pos_x;
     lv_coord_t pos_y; 

@@ -50,6 +50,19 @@ static lv_obj_t *scr_back_btn_create(lv_obj_t *parent, const char *text, lv_even
     lv_obj_set_style_text_color(label2, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_label_set_text(label2, LV_SYMBOL_LEFT);
 
+    // Every caller already passes the screen name, so show it: without a title
+    // the deeper screens were only identifiable by their contents.
+    if(text && text[0]) {
+        lv_obj_t *title = lv_label_create(parent);
+        lv_obj_set_style_text_font(title, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+        lv_obj_set_style_text_color(title, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(title, LV_HOR_RES - 80);
+        lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_label_set_text(title, text);
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
+    }
+
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_align_to(label, label2, LV_ALIGN_OUT_RIGHT_MID, 5, -1);
     lv_obj_set_style_text_font(label, FONT_BOLD_MONO_SIZE_15, LV_PART_MAIN);
@@ -102,22 +115,28 @@ static lv_obj_t * menu_taskbar_charge = NULL;
 static lv_obj_t * menu_taskbar_battery = NULL;
 static lv_obj_t * menu_taskbar_battery_percent = NULL;
 static lv_obj_t * menu_taskbar_wifi = NULL;
+static lv_obj_t * menu_taskbar_signal = NULL;
+static lv_obj_t * menu_taskbar_unread = NULL;
 
 static int page_num = 0;
 static int page_curr = 0;
 
+/* The phone apps lead, so the things you reach for every day are on the first
+ * page; the utilities and the two power actions follow. */
 static struct menu_btn menu_btn_list[] = 
 {
-    {SCREEN1_ID,  &img_lora,    "Lora",     23,     13},  // Page one
-    {SCREEN2_ID,  &img_setting, "Setting",  95,     13},
-    {SCREEN3_ID,  &img_GPS,     "GPS",      167,    13},
-    {SCREEN4_ID,  &img_wifi,    "Wifi",     23,     101},
-    {SCREEN5_ID,  &img_test,    "Test",     95,     101},
-    {SCREEN6_ID,  &img_batt,    "Battery",  167,    101},
-    {SCREEN11_ID, &img_PCM5102, "Sleep",    23,     189},
-    {SCREEN8_ID,  &img_A7682E,  "Phone" ,   95,     189},
-    {SCREEN9_ID,  &img_lora,    "Shutdown", 167,    189},
+    {SCREEN8_ID,  &img_A7682E,  NULL,                "Phone" ,   23,     13},  // Page one
+    {SCREEN12_ID, NULL,         LV_SYMBOL_LIST,      "Contacts", 95,     13},
+    {SCREEN13_ID, NULL,         LV_SYMBOL_ENVELOPE,  "Messages", 167,    13},
+    {SCREEN2_ID,  &img_setting, NULL,                "Setting",  23,     101},
+    {SCREEN3_ID,  &img_GPS,     NULL,                "GPS",      95,     101},
+    {SCREEN4_ID,  &img_wifi,    NULL,                "Wifi",     167,    101},
+    {SCREEN1_ID,  &img_lora,    NULL,                "Lora",     23,     189},
+    {SCREEN6_ID,  &img_batt,    NULL,                "Battery",  95,     189},
+    {SCREEN5_ID,  &img_test,    NULL,                "Test",     167,    189},
 
+    {SCREEN11_ID, &img_PCM5102, NULL,                "Sleep",    23,     13},  // Page two
+    {SCREEN9_ID,  NULL,         LV_SYMBOL_POWER,     "Shutdown", 95,     13},
 };
 
 static void menu_btn_event_cb(lv_event_t *e)
@@ -189,7 +208,14 @@ static void menu_btn_create(lv_obj_t *parent, struct menu_btn *info)
 
     lv_obj_set_x(btn, info->pos_x);
     lv_obj_set_y(btn, info->pos_y);
-    lv_obj_set_style_bg_img_src(btn, info->icon, LV_PART_MAIN | LV_STATE_DEFAULT);
+    if(info->icon) {
+        lv_obj_set_style_bg_img_src(btn, info->icon, LV_PART_MAIN | LV_STATE_DEFAULT);
+    } else {
+        // A symbol works as a background image source, but it is drawn with the
+        // button's own text font - which the child label overrides for itself.
+        lv_obj_set_style_text_font(btn, &lv_font_montserrat_26, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_img_src(btn, info->symbol, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
     lv_label_set_text(label, (info->name));
     lv_obj_set_style_border_width(label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_event_cb(btn, menu_btn_event_cb, LV_EVENT_CLICKED, (void *)info);
@@ -228,6 +254,16 @@ static void create0(lv_obj_t *parent)
     lv_obj_set_scrollbar_mode(status_parent, LV_SCROLLBAR_MODE_OFF);
     lv_obj_clear_flag(status_parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(status_parent, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    // An envelope for anything unread and a handset once the network has the
+    // phone registered: the two things you want to know without opening an app.
+    menu_taskbar_unread = lv_label_create(status_parent);
+    lv_label_set_text_fmt(menu_taskbar_unread, "%s", LV_SYMBOL_ENVELOPE);
+    lv_obj_add_flag(menu_taskbar_unread, LV_OBJ_FLAG_HIDDEN);
+
+    menu_taskbar_signal = lv_label_create(status_parent);
+    lv_label_set_text_fmt(menu_taskbar_signal, "%s", LV_SYMBOL_CALL);
+    lv_obj_add_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
 
     menu_taskbar_wifi = lv_label_create(status_parent);
     lv_label_set_text_fmt(menu_taskbar_wifi, "%s", LV_SYMBOL_WIFI);
@@ -1184,74 +1220,39 @@ static void scr4_1_btn_event_cb(lv_event_t * e)
     }
 }
 
-void readAllFromModem() {
-    while(SerialAT.available()) {
-        Serial.write(SerialAT.read());
-    }
-}
+/* The access point settings the modem is configured with when this screen is
+ * opened. They go through the modem service one at a time; the replies land in
+ * the serial monitor, which is where this screen has always reported results. */
+static const char *wifi_ap_setup_cmds[] = {
+    "AT+CGDATA=\"\",1",        // enter data mode
+    "AT+CGPADDR",              // report the assigned address
+    "AT+CWMAP=0",              // stop the AP while it is reconfigured
+    "AT+CWSSID=lilyphone1",
+    "AT+CWAUTH=5,3,password",
+    "AT+CWMOCH=4,0",           // mode and channel
+    "AT+CWISO=1",              // isolate clients from each other
+    "AT+CWMAP=1",              // bring the AP back up
+};
 
-static void create4_1(lv_obj_t *parent) 
+static void create4_1(lv_obj_t *parent)
 {
+    lv_obj_t *info = lv_label_create(parent);
+    lv_obj_set_width(info, LV_HOR_RES * 0.9);
+    lv_obj_set_style_text_font(info, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_align(info, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(info, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(info, "Configuring the modem access point.\n\nSSID: lilyphone1\n\nProgress is written to the serial monitor.");
+    lv_obj_align(info, LV_ALIGN_CENTER, 0, 0);
+
     // back
     scr_back_btn_create(parent, "Wifi Config", scr4_1_btn_event_cb);
 }
 
-static void entry4_1(void) 
+static void entry4_1(void)
 {
-    readAllFromModem();
-    Serial.println("\nMake sure the modem is in command mode...");
-    for(int i=0; i<3; i++) {
-        Serial.print("+");
-        readAllFromModem();
-        delay(100);
-    }    
-
-    Serial.println("Enter data mode...");
-    SerialAT.println("AT+CGDATA=\"\",1");
-    delay(100);
-    readAllFromModem();
-
-    Serial.println("Fetch address detials...");
-    SerialAT.println("AT+CGPADDR");
-    delay(100);
-    readAllFromModem();
-
-    /*
-    Serial.println("\nScan wifi networks...");
-    SerialAT.println("AT+CWSTASCANSYN=1");
-    delay(100);
-    readAllFromModem();
-    */
-    
-    Serial.println("\nDisabling wifi...");
-    SerialAT.println("AT+CWMAP=0");
-    delay(100);
-    readAllFromModem();
-
-    Serial.println("\nSetting ssid...");
-    SerialAT.println("AT+CWSSID=lilyphone1");
-    delay(100);
-    readAllFromModem();
-
-    Serial.println("\nConfiguring wifi...");
-    SerialAT.println("AT+CWAUTH=5,3,password");
-    delay(100);
-    readAllFromModem();
-
-    Serial.println("\nSetting wifi mode and channel...");
-    SerialAT.println("AT+CWMOCH=4,0");
-    delay(100);
-    readAllFromModem();
-
-    Serial.println("\nEnabling client isolation...");
-    SerialAT.println("AT+CWISO=1");
-    delay(100);
-    readAllFromModem();
-
-    Serial.println("\nEnabling wifi...");
-    SerialAT.println("AT+CWMAP=1");
-    delay(100);
-    readAllFromModem();
+    for(int i = 0; i < GET_BUFF_LEN(wifi_ap_setup_cmds); i++) {
+        ui_modem_at(wifi_ap_setup_cmds[i]);
+    }
 
     ui_disp_full_refr();
 }
@@ -1340,32 +1341,15 @@ static void create4_2(lv_obj_t *parent)
 
     lv_obj_t *back4_label = scr_back_btn_create(parent, ("Wifi"), scr4_2_btn_event_cb);
 }
-extern TaskHandle_t a7682_handle;
-
-static void entry4_2(void) 
+static void entry4_2(void)
 {
-    SerialAT.println("\n\nATZ");
-    SerialAT.println("AT+CWSTASCANSYN=1");
+    ui_modem_at("AT+CWSTASCANSYN=1");
     ui_disp_full_refr();
-    vTaskResume(a7682_handle);
-
-    /*
-    wifi_scan_timer = lv_timer_create(wifi_scan_timer_event, 10000, NULL);
-    lv_timer_ready(wifi_scan_timer);
-    */
 }
 
 static void exit4_2(void) {
     ui_disp_full_refr();
-    SerialAT.println("AT+CWSTASCANSYN=0");
-    vTaskSuspend(a7682_handle);
-
-    /*
-    if(wifi_scan_timer) {
-        lv_timer_del(wifi_scan_timer);
-        wifi_scan_timer = NULL;
-    }
-        */
+    ui_modem_at("AT+CWSTASCANSYN=0");
 }
 
 static void destroy4_2(void) { }
@@ -1892,42 +1876,267 @@ static scr_lifecycle_t screen6_2 = {
 #undef line_max
 #endif
 
-//************************************[ screen 8 ]****************************************** A7682E
-// --------------------- screen 8 --------------------- A7682E
-
+//************************************[ phone apps ]****************************************
+/* Shared state for the dialer, contacts and messaging screens.
+ *
+ * The screen manager destroys a screen's widgets when it is popped, so a screen
+ * cannot hand a value straight to the one that pushed it. These few variables
+ * are the hand-off: whoever pushes a screen sets the subject first, and the
+ * pushed screen reads it in its create()/entry().
+ *
+ * The revision counters are the other half of that: a list built in create()
+ * goes stale when a message arrives or a contact is edited underneath it, so
+ * each list screen records the revision it was built from and repopulates
+ * itself in entry() when the number has moved on. Rebuilding in place matters -
+ * popping and pushing from inside entry() would re-enter the screen manager
+ * while it is still walking its own stack. */
 #if 1
-static void event_handler(lv_event_t * e)
-{
-    lv_event_code_t code = lv_event_get_code(e);
-    lv_obj_t * obj = (lv_obj_t *)lv_event_get_target(e);
-    lv_obj_t * ta =  (lv_obj_t *)lv_event_get_user_data(e);
+static char ui_active_number[CONTACT_NUMBER_LEN] = {0}; // who the pushed screen is about
+static char ui_compose_prefill[SMS_TEXT_LEN] = {0};     // body to open the composer with
+static int  ui_active_contact = -1;                     // contact index, -1 when it is a new one
+static int  ui_pick_mode = UI_PICK_NONE;                // why the contact list was opened
+static bool ui_pick_ready = false;                      // a pick landed in ui_active_number
 
-    if(code == LV_EVENT_VALUE_CHANGED) {
-        uint32_t id = lv_btnmatrix_get_selected_btn(obj);
-        const char * txt = lv_btnmatrix_get_btn_text(obj, id);
-        int len = strlen(txt);
- 
-        if(!strcmp(txt, LV_SYMBOL_CALL)) {
-            ui_a7682_call(lv_textarea_get_text(ta));
-        } else if(!strcmp(txt, "Hang up"))
-        {
-            ui_a7682_hang_up();
-        } else if(!strcmp(txt, LV_SYMBOL_BACKSPACE))
-        {
-            lv_textarea_del_char(ta);
-        }else{
-            lv_textarea_add_text(ta, txt);
-        }
+static uint32_t ui_sms_revision      = 0;
+static uint32_t ui_contacts_revision = 0;
+
+/* The message currently with the modem. Watched centrally rather than by the
+ * composer, so that navigating away from the composer still leaves the log
+ * with the right delivery status. */
+static uint32_t ui_send_watch_id  = 0;
+static int      ui_send_watch_idx = -1;
+
+static void ui_set_active_number(const char *number)
+{
+    if(number == NULL) number = "";
+    lv_snprintf(ui_active_number, CONTACT_NUMBER_LEN, "%s", number);
+    ui_active_contact = contacts_find_by_number(ui_active_number);
+}
+
+/* "14:05" for today, "04/09 14:05" for anything older. Shows "--:--" until the
+ * GPS has given us a clock. */
+static void ui_format_stamp(char *buf, int len, uint32_t ts)
+{
+    if(ts == 0) {
+        lv_snprintf(buf, len, "--:--");
+        return;
+    }
+
+    time_t    when = (time_t)ts;
+    time_t    now  = time(NULL);
+    struct tm when_tm;
+    struct tm now_tm;
+
+    localtime_r(&when, &when_tm);
+    localtime_r(&now, &now_tm);
+
+    if(when_tm.tm_year == now_tm.tm_year && when_tm.tm_yday == now_tm.tm_yday) {
+        strftime(buf, len, "%H:%M", &when_tm);
+    } else {
+        strftime(buf, len, "%d/%m %H:%M", &when_tm);
     }
 }
 
-static const char * btnm_map[] = {  "1", "2", "3", "\n",
-                                    "4", "5", "6", "\n",
-                                    "7", "8", "9", "\n",
-                                    "*", "0", "#", "\n",
-                                    LV_SYMBOL_CALL, "Hang up", LV_SYMBOL_BACKSPACE,""
-                                 };
+/* A button in the top right of a screen, opposite the back button. */
+static lv_obj_t *scr_action_btn_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_btn_create(parent);
+    lv_obj_remove_style_all(btn);
+    lv_obj_set_size(btn, 34, 30);
+    lv_obj_align(btn, LV_ALIGN_TOP_RIGHT, -3, 3);
+    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
 
+    lv_obj_t *label = lv_label_create(btn);
+    lv_obj_center(label);
+    lv_obj_set_style_text_color(label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_text(label, symbol);
+
+    return btn;
+}
+
+/* The scrolling list body every app screen uses below its title bar. */
+static lv_obj_t *scr_app_list_create(lv_obj_t *parent)
+{
+    lv_obj_t *list = lv_list_create(parent);
+    lv_obj_set_size(list, lv_pct(96), LV_VER_RES - 36);
+    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_pad_all(list, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(list, 6, LV_PART_MAIN);
+    lv_obj_set_style_radius(list, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(list, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(list, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+    return list;
+}
+
+/* One tappable row: a bold first line and, optionally, a quieter second one.
+ * `badge` is drawn at the right of the first line - used for timestamps. */
+static lv_obj_t *scr_row_create(lv_obj_t *list, const char *title, const char *subtitle,
+                                const char *badge, lv_event_cb_t cb, void *user_data)
+{
+    lv_obj_t *row = lv_btn_create(list);
+    lv_obj_set_size(row, lv_pct(100), subtitle ? 46 : 34);
+    lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(row, 1, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(row, 4, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *first = lv_label_create(row);
+    lv_obj_set_style_text_font(first, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_label_set_long_mode(first, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(first, badge ? 148 : 208);
+    lv_label_set_text(first, title);
+    lv_obj_align(first, subtitle ? LV_ALIGN_TOP_LEFT : LV_ALIGN_LEFT_MID, 2, subtitle ? 1 : 0);
+
+    if(subtitle) {
+        lv_obj_t *second = lv_label_create(row);
+        lv_obj_set_style_text_font(second, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_label_set_long_mode(second, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(second, 208);
+        lv_label_set_text(second, subtitle);
+        lv_obj_align(second, LV_ALIGN_BOTTOM_LEFT, 2, -1);
+    }
+
+    if(badge) {
+        lv_obj_t *tag = lv_label_create(row);
+        lv_obj_set_style_text_font(tag, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_label_set_text(tag, badge);
+        lv_obj_align(tag, LV_ALIGN_TOP_RIGHT, -2, 1);
+    }
+
+    lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, user_data);
+    return row;
+}
+
+/* Explains an empty list rather than leaving the user staring at blank paper. */
+static lv_obj_t *scr_empty_note_create(lv_obj_t *parent, const char *text)
+{
+    lv_obj_t *note = lv_label_create(parent);
+    lv_obj_set_width(note, lv_pct(90));
+    lv_obj_set_style_text_font(note, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(note, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(note, 60, LV_PART_MAIN);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(note, text);
+    return note;
+}
+
+/* A row of wide buttons across the bottom of a screen. */
+static lv_obj_t *scr_action_bar_create(lv_obj_t *parent, lv_coord_t height)
+{
+    lv_obj_t *bar = lv_obj_create(parent);
+    lv_obj_set_size(bar, lv_pct(96), height);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_set_style_bg_color(bar, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(bar, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(bar, 6, LV_PART_MAIN);
+    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    return bar;
+}
+
+static lv_obj_t *scr_bar_btn_create(lv_obj_t *bar, const char *text, lv_coord_t width,
+                                    lv_event_cb_t cb, void *user_data)
+{
+    lv_obj_t *btn = lv_btn_create(bar);
+    lv_obj_set_size(btn, width, 34);
+    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, 8, LV_PART_MAIN);
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_obj_set_style_text_font(label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_label_set_text(label, text);
+    lv_obj_center(label);
+
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
+    return btn;
+}
+
+/* A labelled single-line text field. */
+static lv_obj_t *scr_field_create(lv_obj_t *parent, const char *label_text, lv_coord_t y,
+                                  const char *value, int max_len)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_style_text_font(label, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_text(label, label_text);
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 10, y);
+
+    lv_obj_t *ta = lv_textarea_create(parent);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, max_len);
+    lv_obj_set_width(ta, lv_pct(92));
+    lv_obj_set_style_text_font(ta, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+    lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, y + 16);
+    if(value && value[0]) lv_textarea_set_text(ta, value);
+
+    return ta;
+}
+#endif
+//************************************[ screen 8 ]****************************************** dialer
+#if 1
+static lv_obj_t *scr8_number_ta = NULL;
+static lv_obj_t *scr8_name_label = NULL;
+
+/* Redraws the "who is this" line under the dialled digits. */
+static void scr8_update_name(void)
+{
+    if(scr8_name_label == NULL) return;
+
+    const char *typed = lv_textarea_get_text(scr8_number_ta);
+    int         idx   = (typed && typed[0]) ? contacts_find_by_number(typed) : -1;
+    const contact_t *c = contacts_get(idx);
+
+    lv_label_set_text(scr8_name_label, c ? c->name : " ");
+}
+
+static void scr8_keypad_event(lv_event_t *e)
+{
+    lv_obj_t   *btnm = (lv_obj_t *)lv_event_get_target(e);
+    uint32_t    id   = lv_btnmatrix_get_selected_btn(btnm);
+    const char *txt  = lv_btnmatrix_get_btn_text(btnm, id);
+
+    if(txt == NULL) return;
+
+    if(strcmp(txt, LV_SYMBOL_CALL) == 0) {
+        const char *number = lv_textarea_get_text(scr8_number_ta);
+        if(number == NULL || number[0] == '\0') return;
+        ui_set_active_number(number);
+        ui_phone_dial(number);
+        scr_mgr_push(SCREEN8_1_ID, false);
+    } else if(strcmp(txt, LV_SYMBOL_LIST) == 0) {
+        ui_pick_mode = UI_PICK_DIAL;
+        scr_mgr_push(SCREEN12_ID, false);
+    } else if(strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) {
+        lv_textarea_del_char(scr8_number_ta);
+        scr8_update_name();
+    } else {
+        lv_textarea_add_text(scr8_number_ta, txt);
+        scr8_update_name();
+    }
+}
+
+static const char * btnm_map[] = { "1", "2", "3", "\n",
+                                   "4", "5", "6", "\n",
+                                   "7", "8", "9", "\n",
+                                   "*", "0", "#", "\n",
+                                   LV_SYMBOL_CALL, LV_SYMBOL_LIST, LV_SYMBOL_BACKSPACE, ""
+                                 };
 
 static void scr8_btn_event_cb(lv_event_t * e)
 {
@@ -1936,46 +2145,956 @@ static void scr8_btn_event_cb(lv_event_t * e)
     }
 }
 
-static void create8(lv_obj_t *parent) 
+/* Save whatever has been typed as a new contact. */
+static void scr8_save_event_cb(lv_event_t *e)
 {
-    lv_obj_t * ta = lv_textarea_create(parent);
-    lv_textarea_set_one_line(ta, true);
-    lv_obj_set_width(ta, lv_pct(98));
-    lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, lv_pct(20));
-    lv_obj_set_style_text_font(ta, &Font_Mono_Bold_20, LV_PART_MAIN);
-    // lv_obj_add_state(ta, LV_STATE_FOCUSED); /*To be sure the cursor is visible*/
-    // lv_obj_clear_flag(ta, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_text_letter_space(ta, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_line_space(ta, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    LV_UNUSED(e);
+
+    const char *number = lv_textarea_get_text(scr8_number_ta);
+    if(number == NULL || number[0] == '\0') return;
+
+    ui_set_active_number(number);
+    scr_mgr_push(SCREEN12_2_ID, false);
+}
+
+static void create8(lv_obj_t *parent)
+{
+    scr8_number_ta = lv_textarea_create(parent);
+    lv_textarea_set_one_line(scr8_number_ta, true);
+    lv_textarea_set_max_length(scr8_number_ta, CONTACT_NUMBER_LEN - 1);
+    lv_obj_set_width(scr8_number_ta, lv_pct(94));
+    lv_obj_align(scr8_number_ta, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_set_style_text_font(scr8_number_ta, &Font_Mono_Bold_20, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(scr8_number_ta, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_line_space(scr8_number_ta, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    // Naming the number as it is dialled is the difference between a keypad
+    // and a phone.
+    scr8_name_label = lv_label_create(parent);
+    lv_obj_set_style_text_font(scr8_name_label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr8_name_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(scr8_name_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(scr8_name_label, lv_pct(94));
+    lv_obj_set_style_text_align(scr8_name_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_text(scr8_name_label, " ");
+    lv_obj_align(scr8_name_label, LV_ALIGN_TOP_MID, 0, 84);
 
     lv_obj_t * btnm1 = lv_btnmatrix_create(parent);
     lv_btnmatrix_set_map(btnm1, btnm_map);
     lv_obj_set_size(btnm1, lv_pct(100)-2, lv_pct(60));
     lv_obj_set_style_border_width(btnm1, 0, 0);
-    // lv_btnmatrix_set_btn_width(btnm1, 10, 2);        /*Make "Action1" twice as wide as "Action2"*/
-    // lv_btnmatrix_set_btn_ctrl(btnm1, 10, LV_BTNMATRIX_CTRL_CHECKABLE);
-    // lv_btnmatrix_set_btn_ctrl(btnm1, 11, LV_BTNMATRIX_CTRL_CHECKED);
     lv_obj_align(btnm1, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_event_cb(btnm1, event_handler, LV_EVENT_VALUE_CHANGED, ta);
-    
-    lv_obj_t *back8_1_label = scr_back_btn_create(parent, ("Call"), scr8_btn_event_cb);
+    lv_obj_add_event_cb(btnm1, scr8_keypad_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+    scr_back_btn_create(parent, "Phone", scr8_btn_event_cb);
+    scr_action_btn_create(parent, LV_SYMBOL_PLUS, scr8_save_event_cb);
 }
-static void entry8(void) 
+
+static void entry8(void)
 {
-    ui_a7682_loop_resume();
+    // Coming back from the contact picker, adopt whatever was chosen there.
+    if(ui_pick_ready && ui_pick_mode == UI_PICK_DIAL) {
+        lv_textarea_set_text(scr8_number_ta, ui_active_number);
+    }
+    ui_pick_ready = false;
+    ui_pick_mode  = UI_PICK_NONE;
+
+    lv_group_focus_obj(scr8_number_ta);
+    scr8_update_name();
     ui_disp_full_refr();
 }
+
 static void exit8(void) {
-    ui_a7682_loop_suspend();
     ui_disp_full_refr();
 }
-static void destroy8(void) { }
+
+static void destroy8(void)
+{
+    scr8_number_ta  = NULL;
+    scr8_name_label = NULL;
+}
 
 static scr_lifecycle_t screen8 = {
     .create = create8,
     .entry = entry8,
     .exit  = exit8,
     .destroy = destroy8,
+};
+#endif
+// --------------------- screen 8.1 --------------------- in call
+#if 1
+static lv_obj_t   *scr8_1_status = NULL;
+static lv_obj_t   *scr8_1_answer = NULL;
+static lv_timer_t *scr8_1_timer  = NULL;
+static modem_call_state_t scr8_1_shown_state = MODEM_CALL_IDLE;
+
+static void scr8_1_answer_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    ui_phone_answer();
+}
+
+static void scr8_1_hangup_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    ui_phone_hang_up();
+    scr_mgr_pop(false);
+}
+
+static void scr8_1_render(void)
+{
+    modem_call_state_t state = ui_phone_get_call_state();
+    char buf[40];
+
+    switch(state) {
+        case MODEM_CALL_INCOMING:
+            lv_label_set_text(scr8_1_status, "Incoming call");
+            break;
+
+        case MODEM_CALL_DIALING:
+            lv_label_set_text(scr8_1_status, "Calling...");
+            break;
+
+        case MODEM_CALL_ACTIVE: {
+            uint32_t secs = ui_phone_get_call_duration() / 1000;
+            lv_snprintf(buf, sizeof(buf), "Connected  %02u:%02u",
+                        (unsigned)(secs / 60), (unsigned)(secs % 60));
+            lv_label_set_text(scr8_1_status, buf);
+            break;
+        }
+
+        default:
+            lv_label_set_text(scr8_1_status, "Call ended");
+            break;
+    }
+
+    // Answering only makes sense while the other end is still ringing.
+    if(state == MODEM_CALL_INCOMING) {
+        lv_obj_clear_flag(scr8_1_answer, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(scr8_1_answer, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if(state != scr8_1_shown_state) {
+        scr8_1_shown_state = state;
+        ui_disp_full_refr();
+    }
+}
+
+/* The e-ink panel repaints in full for every update, so the call timer ticks
+ * every few seconds rather than every second. */
+static void scr8_1_timer_event(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    // Leave the screen once the end of the call has been shown once.
+    if(ui_phone_get_call_state() == MODEM_CALL_IDLE && scr8_1_shown_state == MODEM_CALL_IDLE) {
+        scr_mgr_pop(false);
+        return;
+    }
+    scr8_1_render();
+}
+
+static void create8_1(lv_obj_t *parent)
+{
+    char number[CONTACT_NUMBER_LEN];
+    ui_phone_get_call_number(number, sizeof(number));
+    if(number[0] == '\0') {
+        lv_snprintf(number, sizeof(number), "%s", ui_active_number);
+    }
+
+    const char *name = number[0] ? contacts_display_name(number) : "Unknown caller";
+
+    lv_obj_t *who = lv_label_create(parent);
+    lv_obj_set_width(who, lv_pct(92));
+    lv_obj_set_style_text_font(who, &Font_Mono_Bold_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(who, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(who, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(who, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(who, name);
+    lv_obj_align(who, LV_ALIGN_TOP_MID, 0, 62);
+
+    // When the name came from the contact book, still show the raw number.
+    lv_obj_t *sub = lv_label_create(parent);
+    lv_obj_set_width(sub, lv_pct(92));
+    lv_obj_set_style_text_font(sub, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(sub, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+    lv_label_set_text(sub, (strcmp(name, number) == 0) ? " " : number);
+    lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, 126);
+
+    scr8_1_status = lv_label_create(parent);
+    lv_obj_set_width(scr8_1_status, lv_pct(92));
+    lv_obj_set_style_text_font(scr8_1_status, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr8_1_status, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(scr8_1_status, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_text(scr8_1_status, "Calling...");
+    lv_obj_align(scr8_1_status, LV_ALIGN_CENTER, 0, 20);
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 44);
+    scr8_1_answer = scr_bar_btn_create(bar, LV_SYMBOL_CALL "  Answer", 106, scr8_1_answer_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Hang up", 106, scr8_1_hangup_event, NULL);
+
+    scr_back_btn_create(parent, "Call", scr8_btn_event_cb);
+}
+
+static void entry8_1(void)
+{
+    scr8_1_shown_state = MODEM_CALL_IDLE;
+    scr8_1_render();
+
+    if(ui_phone_get_call_state() == MODEM_CALL_INCOMING) {
+        ui_phone_vibrate(400);
+    }
+
+    if(scr8_1_timer == NULL) {
+        scr8_1_timer = lv_timer_create(scr8_1_timer_event, 3000, NULL);
+    }
+    ui_disp_full_refr();
+}
+
+static void exit8_1(void)
+{
+    if(scr8_1_timer) {
+        lv_timer_del(scr8_1_timer);
+        scr8_1_timer = NULL;
+    }
+    ui_disp_full_refr();
+}
+
+static void destroy8_1(void)
+{
+    scr8_1_status = NULL;
+    scr8_1_answer = NULL;
+}
+
+static scr_lifecycle_t screen8_1 = {
+    .create = create8_1,
+    .entry = entry8_1,
+    .exit  = exit8_1,
+    .destroy = destroy8_1,
+};
+#endif
+//************************************[ screen 12 ]***************************************** contacts
+#if 1
+static lv_obj_t *scr12_list = NULL;
+static uint32_t  scr12_built_revision = 0;
+
+static void scr12_row_event(lv_event_t *e)
+{
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    const contact_t *c = contacts_get(idx);
+    if(c == NULL) return;
+
+    if(ui_pick_mode != UI_PICK_NONE) {
+        // Opened to choose a number for the dialer or the composer: hand the
+        // number back and let the screen underneath pick it up.
+        lv_snprintf(ui_active_number, CONTACT_NUMBER_LEN, "%s", c->number);
+        ui_active_contact = idx;
+        ui_pick_ready     = true;
+        scr_mgr_pop(false);
+        return;
+    }
+
+    ui_active_contact = idx;
+    lv_snprintf(ui_active_number, CONTACT_NUMBER_LEN, "%s", c->number);
+    scr_mgr_push(SCREEN12_1_ID, false);
+}
+
+static void scr12_populate(void)
+{
+    lv_obj_clean(scr12_list);
+
+    int count = contacts_count();
+    if(count == 0) {
+        scr_empty_note_create(scr12_list,
+            "No contacts yet.\n\nUse " LV_SYMBOL_PLUS " to add one, or save a number from the dialer.");
+    }
+
+    for(int i = 0; i < count; i++) {
+        const contact_t *c = contacts_get(i);
+        scr_row_create(scr12_list, c->name, c->number, NULL, scr12_row_event, (void *)(intptr_t)i);
+    }
+
+    scr12_built_revision = ui_contacts_revision;
+}
+
+static void scr12_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        ui_pick_mode  = UI_PICK_NONE;
+        ui_pick_ready = false;
+        scr_mgr_pop(false);
+    }
+}
+
+static void scr12_add_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    ui_active_contact   = -1;
+    ui_active_number[0] = '\0';
+    scr_mgr_push(SCREEN12_2_ID, false);
+}
+
+static void create12(lv_obj_t *parent)
+{
+    scr12_list = scr_app_list_create(parent);
+    scr12_populate();
+
+    scr_back_btn_create(parent, ui_pick_mode == UI_PICK_NONE ? "Contacts" : "Choose contact",
+                        scr12_back_event);
+    if(ui_pick_mode == UI_PICK_NONE) {
+        scr_action_btn_create(parent, LV_SYMBOL_PLUS, scr12_add_event);
+    }
+}
+
+static void entry12(void)
+{
+    if(scr12_built_revision != ui_contacts_revision) {
+        scr12_populate();
+    }
+    ui_disp_full_refr();
+}
+
+static void exit12(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy12(void)
+{
+    scr12_list = NULL;
+}
+
+static scr_lifecycle_t screen12 = {
+    .create = create12,
+    .entry = entry12,
+    .exit  = exit12,
+    .destroy = destroy12,
+};
+#endif
+// --------------------- screen 12.1 --------------------- contact details
+#if 1
+static void scr12_1_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        scr_mgr_pop(false);
+    }
+}
+
+static void scr12_1_call_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(ui_active_number[0] == '\0') return;
+
+    ui_phone_dial(ui_active_number);
+    scr_mgr_push(SCREEN8_1_ID, false);
+}
+
+static void scr12_1_message_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(ui_active_number[0] == '\0') return;
+
+    ui_compose_prefill[0] = '\0';
+    scr_mgr_push(SCREEN13_2_ID, false);
+}
+
+static void scr12_1_edit_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr_mgr_push(SCREEN12_2_ID, false);
+}
+
+static void scr12_1_delete_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    if(contacts_remove(ui_active_contact)) {
+        ui_active_contact = -1;
+        ui_contacts_revision++;
+        scr_mgr_pop(false); // the list rebuilds itself on the way back
+    }
+}
+
+static void create12_1(lv_obj_t *parent)
+{
+    const contact_t *c = contacts_get(ui_active_contact);
+    const char *name   = c ? c->name : ui_active_number;
+
+    lv_obj_t *name_label = lv_label_create(parent);
+    lv_obj_set_width(name_label, lv_pct(92));
+    lv_obj_set_style_text_font(name_label, &Font_Mono_Bold_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(name_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(name_label, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(name_label, name);
+    lv_obj_align(name_label, LV_ALIGN_TOP_MID, 0, 60);
+
+    lv_obj_t *number_label = lv_label_create(parent);
+    lv_obj_set_width(number_label, lv_pct(92));
+    lv_obj_set_style_text_font(number_label, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(number_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(number_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(number_label, LV_LABEL_LONG_DOT);
+    lv_label_set_text(number_label, ui_active_number);
+    lv_obj_align(number_label, LV_ALIGN_TOP_MID, 0, 104);
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 86);
+    scr_bar_btn_create(bar, LV_SYMBOL_CALL "  Call", 106, scr12_1_call_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_ENVELOPE "  Text", 106, scr12_1_message_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_EDIT "  Edit", 106, scr12_1_edit_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_TRASH "  Delete", 106, scr12_1_delete_event, NULL);
+
+    scr_back_btn_create(parent, "Contact", scr12_1_back_event);
+}
+
+static void entry12_1(void)
+{
+    ui_disp_full_refr();
+}
+
+static void exit12_1(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy12_1(void) { }
+
+static scr_lifecycle_t screen12_1 = {
+    .create = create12_1,
+    .entry = entry12_1,
+    .exit  = exit12_1,
+    .destroy = destroy12_1,
+};
+#endif
+// --------------------- screen 12.2 --------------------- contact editor
+#if 1
+static lv_obj_t *scr12_2_name_ta   = NULL;
+static lv_obj_t *scr12_2_number_ta = NULL;
+
+static void scr12_2_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        scr_mgr_pop(false);
+    }
+}
+
+/* Digits always go to the number field, wherever the keyboard focus happens to
+ * be: the on-screen pad exists precisely because the number is the awkward
+ * field to fill from the hardware keyboard. */
+static void scr12_2_keypad_event(lv_event_t *e)
+{
+    lv_obj_t   *btnm = (lv_obj_t *)lv_event_get_target(e);
+    uint32_t    id   = lv_btnmatrix_get_selected_btn(btnm);
+    const char *txt  = lv_btnmatrix_get_btn_text(btnm, id);
+
+    if(txt == NULL) return;
+
+    if(strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) {
+        lv_textarea_del_char(scr12_2_number_ta);
+    } else {
+        lv_textarea_add_text(scr12_2_number_ta, txt);
+    }
+}
+
+static void scr12_2_save_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    const char *name   = lv_textarea_get_text(scr12_2_name_ta);
+    const char *number = lv_textarea_get_text(scr12_2_number_ta);
+
+    if(number == NULL || number[0] == '\0') return;
+
+    if(ui_active_contact >= 0) {
+        contacts_update(ui_active_contact, name, number);
+    } else {
+        contacts_add(name, number);
+    }
+    ui_contacts_revision++;
+
+    ui_set_active_number(number);
+    scr_mgr_pop(false);
+}
+
+static const char *scr12_2_keypad_map[] = { "1", "2", "3", "\n",
+                                            "4", "5", "6", "\n",
+                                            "7", "8", "9", "\n",
+                                            "+", "0", LV_SYMBOL_BACKSPACE, ""
+                                          };
+
+static void create12_2(lv_obj_t *parent)
+{
+    const contact_t *c = contacts_get(ui_active_contact);
+
+    scr12_2_name_ta = scr_field_create(parent, "Name", 36,
+                                       c ? c->name : NULL, CONTACT_NAME_LEN - 1);
+    scr12_2_number_ta = scr_field_create(parent, "Number", 96,
+                                         c ? c->number : ui_active_number, CONTACT_NUMBER_LEN - 1);
+
+    lv_obj_t *pad = lv_btnmatrix_create(parent);
+    lv_btnmatrix_set_map(pad, scr12_2_keypad_map);
+    lv_obj_set_size(pad, lv_pct(96), 112);
+    lv_obj_set_style_border_width(pad, 0, LV_PART_MAIN);
+    lv_obj_align(pad, LV_ALIGN_BOTTOM_MID, 0, -48);
+    lv_obj_add_event_cb(pad, scr12_2_keypad_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr12_2_save_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr12_2_back_event, NULL);
+
+    scr_back_btn_create(parent, ui_active_contact >= 0 ? "Edit contact" : "New contact",
+                        scr12_2_back_event);
+}
+
+static void entry12_2(void)
+{
+    // The name is the field the hardware keyboard is for, so start there.
+    lv_group_focus_obj(scr12_2_name_ta);
+    ui_disp_full_refr();
+}
+
+static void exit12_2(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy12_2(void)
+{
+    scr12_2_name_ta   = NULL;
+    scr12_2_number_ta = NULL;
+}
+
+static scr_lifecycle_t screen12_2 = {
+    .create = create12_2,
+    .entry = entry12_2,
+    .exit  = exit12_2,
+    .destroy = destroy12_2,
+};
+#endif
+//************************************[ screen 13 ]***************************************** messages
+#if 1
+static lv_obj_t *scr13_list = NULL;
+static uint32_t  scr13_built_revision = 0;
+
+static void scr13_row_event(lv_event_t *e)
+{
+    int thread = (int)(intptr_t)lv_event_get_user_data(e);
+    const char *number = sms_thread_number(thread);
+    if(number == NULL) return;
+
+    ui_set_active_number(number);
+    scr_mgr_push(SCREEN13_1_ID, false);
+}
+
+static void scr13_populate(void)
+{
+    lv_obj_clean(scr13_list);
+
+    int threads = sms_thread_count();
+    if(threads == 0) {
+        scr_empty_note_create(scr13_list, "No messages yet.\n\nUse " LV_SYMBOL_PLUS " to write one.");
+    }
+
+    for(int i = 0; i < threads; i++) {
+        const char      *number = sms_thread_number(i);
+        const sms_msg_t *last   = sms_thread_last(i);
+        char title[CONTACT_NAME_LEN + 8];
+        char badge[16];
+
+        // An unread marker in the title is easier to spot on e-ink than a
+        // separate dot would be.
+        lv_snprintf(title, sizeof(title), "%s%s",
+                    sms_thread_unread(number) > 0 ? LV_SYMBOL_ENVELOPE " " : "",
+                    contacts_display_name(number));
+
+        ui_format_stamp(badge, sizeof(badge), last ? last->ts : 0);
+
+        scr_row_create(scr13_list, title, last ? last->text : "", badge,
+                       scr13_row_event, (void *)(intptr_t)i);
+    }
+
+    scr13_built_revision = ui_sms_revision;
+}
+
+static void scr13_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        scr_mgr_pop(false);
+    }
+}
+
+static void scr13_new_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    ui_active_number[0]   = '\0';
+    ui_active_contact     = -1;
+    ui_compose_prefill[0] = '\0';
+    scr_mgr_push(SCREEN13_2_ID, false);
+}
+
+static void create13(lv_obj_t *parent)
+{
+    scr13_list = scr_app_list_create(parent);
+    scr13_populate();
+
+    scr_back_btn_create(parent, "Messages", scr13_back_event);
+    scr_action_btn_create(parent, LV_SYMBOL_PLUS, scr13_new_event);
+}
+
+static void entry13(void)
+{
+    if(scr13_built_revision != ui_sms_revision) {
+        scr13_populate();
+    }
+    ui_disp_full_refr();
+}
+
+static void exit13(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy13(void)
+{
+    scr13_list = NULL;
+}
+
+static scr_lifecycle_t screen13 = {
+    .create = create13,
+    .entry = entry13,
+    .exit  = exit13,
+    .destroy = destroy13,
+};
+#endif
+// --------------------- screen 13.1 --------------------- conversation
+#if 1
+// Only the tail of a long conversation is built, to bound widget memory.
+#define SCR13_1_MAX_BUBBLES 25
+
+static lv_obj_t *scr13_1_cont = NULL;
+static uint32_t  scr13_1_built_revision = 0;
+
+static void scr13_1_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        scr_mgr_pop(false);
+    }
+}
+
+static void scr13_1_reply_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    ui_compose_prefill[0] = '\0';
+    scr_mgr_push(SCREEN13_2_ID, false);
+}
+
+static void scr13_1_call_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(ui_active_number[0] == '\0') return;
+
+    ui_phone_dial(ui_active_number);
+    scr_mgr_push(SCREEN8_1_ID, false);
+}
+
+static void scr13_1_delete_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    sms_thread_delete(ui_active_number);
+    ui_sms_revision++;
+    scr_mgr_pop(false);
+}
+
+/* One message, placed at `y` in the conversation; returns the y the next
+ * bubble should start at. Received messages sit against the left edge, sent
+ * ones are pushed right, which is the only cue this display needs to tell them
+ * apart. The bubbles are positioned by hand rather than by a flex layout
+ * because this build of LVGL has no margin properties to offset one child
+ * against the rest. */
+static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, lv_coord_t y)
+{
+    char head[48];
+    char stamp[16];
+
+    ui_format_stamp(stamp, sizeof(stamp), m->ts);
+
+    if(m->dir == SMS_DIR_OUT) {
+        const char *mark = (m->status == SMS_ST_PENDING) ? "  sending..."
+                         : (m->status == SMS_ST_FAILED)  ? "  not sent"
+                                                         : "";
+        lv_snprintf(head, sizeof(head), "%s%s", stamp, mark);
+    } else {
+        lv_snprintf(head, sizeof(head), "%s", stamp);
+    }
+
+    lv_obj_t *bubble = lv_obj_create(parent);
+    lv_obj_set_width(bubble, 180);
+    lv_obj_set_height(bubble, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(bubble, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(bubble, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(bubble, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(bubble, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(bubble, 5, LV_PART_MAIN);
+    lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(bubble, m->dir == SMS_DIR_OUT ? 42 : 0, y);
+
+    lv_obj_t *text = lv_label_create(bubble);
+    lv_obj_set_width(text, lv_pct(100));
+    lv_obj_set_style_text_font(text, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(text, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+    lv_label_set_text_fmt(text, "%s\n%s", head, m->text);
+    if(m->dir == SMS_DIR_OUT) {
+        lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+    }
+
+    // The height only exists once the wrapped text has been laid out.
+    lv_obj_update_layout(bubble);
+    return y + lv_obj_get_height(bubble) + 6;
+}
+
+static void scr13_1_populate(void)
+{
+    lv_obj_clean(scr13_1_cont);
+
+    int total = sms_thread_msg_count(ui_active_number);
+    int first = total > SCR13_1_MAX_BUBBLES ? total - SCR13_1_MAX_BUBBLES : 0;
+
+    if(total == 0) {
+        scr_empty_note_create(scr13_1_cont, "No messages in this conversation.");
+    }
+
+    lv_coord_t y = 0;
+    for(int i = first; i < total; i++) {
+        const sms_msg_t *m = sms_thread_msg(ui_active_number, i);
+        if(m) y = scr13_1_bubble_create(scr13_1_cont, m, y);
+    }
+
+    // Open on the newest message, the way a conversation is normally read.
+    lv_obj_update_layout(scr13_1_cont);
+    lv_obj_scroll_to_y(scr13_1_cont, lv_obj_get_scroll_bottom(scr13_1_cont), LV_ANIM_OFF);
+
+    scr13_1_built_revision = ui_sms_revision;
+}
+
+static void create13_1(lv_obj_t *parent)
+{
+    scr13_1_cont = lv_obj_create(parent);
+    lv_obj_set_size(scr13_1_cont, lv_pct(96), LV_VER_RES - 36 - 44);
+    lv_obj_align(scr13_1_cont, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_set_style_bg_color(scr13_1_cont, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr13_1_cont, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(scr13_1_cont, 2, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(scr13_1_cont, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(scr13_1_cont, LV_SCROLLBAR_MODE_OFF);
+
+    scr13_1_populate();
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_EDIT "  Reply", 76, scr13_1_reply_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CALL "  Call", 68, scr13_1_call_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_TRASH, 44, scr13_1_delete_event, NULL);
+
+    scr_back_btn_create(parent, contacts_display_name(ui_active_number), scr13_1_back_event);
+}
+
+static void entry13_1(void)
+{
+    sms_thread_mark_read(ui_active_number);
+
+    // Rebuild when the log moved on beneath us - a reply we just sent, or a
+    // message that arrived while the composer was open.
+    if(scr13_1_built_revision != ui_sms_revision) {
+        scr13_1_populate();
+    }
+    ui_disp_full_refr();
+}
+
+static void exit13_1(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy13_1(void)
+{
+    scr13_1_cont = NULL;
+}
+
+static scr_lifecycle_t screen13_1 = {
+    .create = create13_1,
+    .entry = entry13_1,
+    .exit  = exit13_1,
+    .destroy = destroy13_1,
+};
+#endif
+// --------------------- screen 13.2 --------------------- compose
+#if 1
+static lv_obj_t   *scr13_2_to_label = NULL;
+static lv_obj_t   *scr13_2_body_ta  = NULL;
+static lv_obj_t   *scr13_2_status   = NULL;
+static lv_timer_t *scr13_2_timer    = NULL;
+
+static void scr13_2_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        scr_mgr_pop(false);
+    }
+}
+
+static void scr13_2_update_to(void)
+{
+    if(scr13_2_to_label == NULL) return;
+
+    if(ui_active_number[0] == '\0') {
+        lv_label_set_text(scr13_2_to_label, "To: (choose a contact)");
+    } else {
+        lv_label_set_text_fmt(scr13_2_to_label, "To: %s", contacts_display_name(ui_active_number));
+    }
+}
+
+static void scr13_2_pick_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    ui_pick_mode = UI_PICK_COMPOSE;
+    scr_mgr_push(SCREEN12_ID, false);
+}
+
+/* Reports how the send that this screen started ended up. The log itself is
+ * corrected centrally, so this only has to keep the label honest while the
+ * screen is open. */
+static void scr13_2_status_timer(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    if(ui_send_watch_id != 0) return; // still with the modem
+
+    const sms_msg_t *m = sms_get(ui_send_watch_idx);
+    lv_label_set_text(scr13_2_status,
+                      (m && m->status == SMS_ST_FAILED) ? "Could not send" : "Sent");
+
+    lv_timer_del(scr13_2_timer);
+    scr13_2_timer = NULL;
+    ui_disp_full_refr();
+}
+
+static void scr13_2_send_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    const char *body = lv_textarea_get_text(scr13_2_body_ta);
+
+    if(ui_active_number[0] == '\0') {
+        lv_label_set_text(scr13_2_status, "Choose who to send to first");
+        return;
+    }
+    if(body == NULL || body[0] == '\0') {
+        lv_label_set_text(scr13_2_status, "Nothing to send");
+        return;
+    }
+    if(ui_send_watch_id != 0) {
+        lv_label_set_text(scr13_2_status, "Still sending the last one");
+        return;
+    }
+
+    uint32_t send_id = ui_sms_send(ui_active_number, body);
+    if(send_id == 0) {
+        lv_label_set_text(scr13_2_status, "Modem is busy, try again");
+        return;
+    }
+
+    // Log it straight away as pending so the conversation reads correctly
+    // however long the network takes.
+    ui_send_watch_idx = sms_add(ui_active_number, body, (uint32_t)time(NULL),
+                                SMS_DIR_OUT, SMS_ST_PENDING, false);
+    ui_send_watch_id  = send_id;
+    ui_sms_revision++;
+
+    lv_textarea_set_text(scr13_2_body_ta, "");
+    lv_label_set_text(scr13_2_status, "Sending...");
+
+    if(scr13_2_timer == NULL) {
+        scr13_2_timer = lv_timer_create(scr13_2_status_timer, 500, NULL);
+    }
+}
+
+static void create13_2(lv_obj_t *parent)
+{
+    scr13_2_to_label = lv_label_create(parent);
+    lv_obj_set_width(scr13_2_to_label, lv_pct(92));
+    lv_obj_set_style_text_font(scr13_2_to_label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr13_2_to_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(scr13_2_to_label, LV_LABEL_LONG_DOT);
+    lv_obj_align(scr13_2_to_label, LV_ALIGN_TOP_LEFT, 10, 38);
+    scr13_2_update_to();
+
+    scr13_2_body_ta = lv_textarea_create(parent);
+    lv_textarea_set_max_length(scr13_2_body_ta, SMS_TEXT_LEN - 1);
+    lv_textarea_set_placeholder_text(scr13_2_body_ta, "Message");
+    lv_obj_set_size(scr13_2_body_ta, lv_pct(92), 148);
+    lv_obj_set_style_text_font(scr13_2_body_ta, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_align(scr13_2_body_ta, LV_ALIGN_TOP_MID, 0, 60);
+    if(ui_compose_prefill[0]) lv_textarea_set_text(scr13_2_body_ta, ui_compose_prefill);
+
+    scr13_2_status = lv_label_create(parent);
+    lv_obj_set_width(scr13_2_status, lv_pct(92));
+    lv_obj_set_style_text_font(scr13_2_status, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr13_2_status, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_text(scr13_2_status, " ");
+    lv_obj_align(scr13_2_status, LV_ALIGN_TOP_LEFT, 10, 216);
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_UP "  Send", 106, scr13_2_send_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_LIST "  To", 106, scr13_2_pick_event, NULL);
+
+    scr_back_btn_create(parent, "New message", scr13_2_back_event);
+}
+
+static void entry13_2(void)
+{
+    if(ui_pick_ready && ui_pick_mode == UI_PICK_COMPOSE) {
+        scr13_2_update_to();
+    }
+    ui_pick_ready = false;
+    ui_pick_mode  = UI_PICK_NONE;
+
+    lv_group_focus_obj(scr13_2_body_ta);
+    ui_disp_full_refr();
+}
+
+static void exit13_2(void)
+{
+    // Keep an unsent draft so stepping into the contact picker is not
+    // destructive; a sent message clears the field before we get here.
+    const char *body = lv_textarea_get_text(scr13_2_body_ta);
+    lv_snprintf(ui_compose_prefill, SMS_TEXT_LEN, "%s", body ? body : "");
+
+    ui_disp_full_refr();
+}
+
+static void destroy13_2(void)
+{
+    if(scr13_2_timer) {
+        lv_timer_del(scr13_2_timer);
+        scr13_2_timer = NULL;
+    }
+    scr13_2_to_label = NULL;
+    scr13_2_body_ta  = NULL;
+    scr13_2_status   = NULL;
+}
+
+static scr_lifecycle_t screen13_2 = {
+    .create = create13_2,
+    .entry = entry13_2,
+    .exit  = exit13_2,
+    .destroy = destroy13_2,
 };
 #endif
 
@@ -2240,8 +3359,30 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
     }
     
 
+    bool registered = ui_phone_is_registered();
+    if(taskbar_statue[TASKBAR_ID_SIGNAL] != (uint16_t)registered)
+    {
+        if(registered) {
+            lv_obj_clear_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
+        }
+        taskbar_statue[TASKBAR_ID_SIGNAL] = registered;
+    }
+
+    uint16_t unread = sms_unread_total();
+    if(taskbar_statue[TASKBAR_ID_UNREAD] != unread)
+    {
+        if(unread > 0) {
+            lv_obj_clear_flag(menu_taskbar_unread, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(menu_taskbar_unread, LV_OBJ_FLAG_HIDDEN);
+        }
+        taskbar_statue[TASKBAR_ID_UNREAD] = unread;
+    }
+
     charge = ui_battery_27220_get_input();
-    if(taskbar_statue[TASKBAR_ID_CHARGE] != charge) 
+    if(taskbar_statue[TASKBAR_ID_CHARGE] != charge)
     {
         if(charge) {
             lv_obj_clear_flag(menu_taskbar_charge, LV_OBJ_FLAG_HIDDEN);
@@ -2253,6 +3394,45 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
 
 }
 
+/* Runs for as long as the phone is on, whatever screen is showing. This is
+ * what makes the device answerable: a call or a message can arrive while the
+ * user is in the settings, and something has to notice.
+ *
+ * It also owns the outcome of an outgoing message, so navigating away from the
+ * composer still leaves the log with the right delivery status. */
+static void phone_event_timer_cb(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    modem_sms_rx_t rx;
+    while(ui_sms_poll_received(&rx)) {
+        sms_add(rx.number, rx.text, rx.ts, SMS_DIR_IN, SMS_ST_OK, true);
+        ui_sms_revision++;
+        ui_phone_vibrate(250);
+    }
+
+    if(ui_send_watch_id != 0) {
+        modem_send_state_t st = ui_sms_get_send_state(ui_send_watch_id);
+        if(st == MODEM_SEND_OK || st == MODEM_SEND_FAILED) {
+            sms_set_status(ui_send_watch_idx, st == MODEM_SEND_OK ? SMS_ST_OK : SMS_ST_FAILED);
+            ui_send_watch_id = 0;
+            ui_sms_revision++;
+        }
+    }
+
+    // Raise the call screen when a call starts ringing. Only on the transition:
+    // pushing it back whenever the state happens to be INCOMING would fight a
+    // user who deliberately backed out of it.
+    static modem_call_state_t last_call_state = MODEM_CALL_IDLE;
+    modem_call_state_t call_state = ui_phone_get_call_state();
+
+    if(call_state == MODEM_CALL_INCOMING && last_call_state != MODEM_CALL_INCOMING &&
+       scr_mgr_current_id() != SCREEN8_1_ID) {
+        scr_mgr_push(SCREEN8_1_ID, false);
+    }
+    last_call_state = call_state;
+}
+
 void ui_phone1_entry(void)
 {
     lv_disp_t *disp = lv_disp_get_default();
@@ -2260,6 +3440,8 @@ void ui_phone1_entry(void)
 
     touch_chk_timer = lv_timer_create(indev_get_gesture_dir, LV_INDEV_DEF_READ_PERIOD, NULL);
     lv_timer_pause(touch_chk_timer);
+
+    lv_timer_create(phone_event_timer_cb, 500, NULL);
 
     taskbar_update_timer = lv_timer_create(menu_taskbar_update_timer_cb, 1000, NULL);
     lv_timer_pause(taskbar_update_timer);
@@ -2280,9 +3462,16 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN6_ID,    &screen6);      // Battery
     scr_mgr_register(SCREEN6_1_ID,  &screen6_1);    //  - BQ25896
     scr_mgr_register(SCREEN6_2_ID,  &screen6_2);    //  - BQ27220
-    scr_mgr_register(SCREEN8_ID,    &screen8);      // A7682E - call
+    scr_mgr_register(SCREEN8_ID,    &screen8);      // Phone - dialer
+    scr_mgr_register(SCREEN8_1_ID,  &screen8_1);    //  - in call
     scr_mgr_register(SCREEN9_ID,    &screen9);      // Shutdown
     scr_mgr_register(SCREEN11_ID,   &screen11);
+    scr_mgr_register(SCREEN12_ID,   &screen12);     // Contacts
+    scr_mgr_register(SCREEN12_1_ID, &screen12_1);   //  - details
+    scr_mgr_register(SCREEN12_2_ID, &screen12_2);   //  - editor
+    scr_mgr_register(SCREEN13_ID,   &screen13);     // Messages
+    scr_mgr_register(SCREEN13_1_ID, &screen13_1);   //  - conversation
+    scr_mgr_register(SCREEN13_2_ID, &screen13_2);   //  - compose
     
 
     scr_mgr_switch(SCREEN0_ID, false); // set root screen
