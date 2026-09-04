@@ -86,6 +86,8 @@ Two rules follow from how it works, and violating either corrupts the stack or f
 - **Never call `scr_mgr_pop`/`push` from inside a screen's own `entry()` or `exit()`** — the manager is mid-walk of its stack. A screen whose contents went stale must rebuild in place (`lv_obj_clean` + repopulate). The list screens do this with revision counters: `ui_sms_revision` / `ui_contacts_revision` are bumped by whoever mutates the data, and each list compares them in `entry()`. `entry()` alone is not enough for data that arrives on its own — it does not run again while a screen stays on top — so `phone_event_timer_cb` also refreshes whichever message screen is currently showing (`ui_sms_refresh_visible()`).
 - Popping from a button's own event callback is fine and is the established pattern, but chaining several pops/pushes in one callback is not.
 
+Auto lock lives in `phone_event_timer_cb`, off `lv_disp_get_inactive_time()` so it counts both touch and keypresses. It is suppressed while a call is up and while the call screen is showing, and the delay is a fixed set of choices in the settings (`UI_SETTING_TYPE_CHOICE`, a row that cycles values on each press).
+
 `scr_mgr_switch()` clears the stack, which is what the lock screen uses: nothing is left behind it holding widgets a stray keypress could reach through the input group. `scr_mgr_push()` keeps the screen underneath alive.
 
 A pushed screen's widgets are destroyed on pop, so a screen cannot return a value directly. The hand-off is a set of file-scope variables in `src/ui/ui_phone1.cpp` (`ui_active_number`, `ui_active_contact`, `ui_pick_mode`, `ui_pick_ready`, `ui_compose_prefill`): the pusher sets the subject, the pushed screen reads it.

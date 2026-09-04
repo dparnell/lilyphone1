@@ -90,6 +90,7 @@ struct menu_btn {
 enum{
     UI_SETTING_TYPE_SW,
     UI_SETTING_TYPE_SUB,
+    UI_SETTING_TYPE_CHOICE, // cycles through a few values, one per press
 };
 
 typedef struct _ui_setting
@@ -99,6 +100,9 @@ typedef struct _ui_setting
     int type;
     void (*set_cb)(bool);
     bool (*get_cb)(void);
+    // CHOICE only: the current value as text, and a step to the next one.
+    const char *(*text_cb)(void);
+    void (*next_cb)(void);
     int sub_id;
     lv_obj_t *obj;
     lv_obj_t *st;

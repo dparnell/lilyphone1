@@ -1260,6 +1260,8 @@ static int setting_curr_page = 0;
  * given a misleading one. */
 static ui_setting_handle setting_handle_list[] = {
     {.name = "Time",             .icon = LV_SYMBOL_REFRESH,  .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_1_ID},
+    {.name = "Auto Lock",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_CHOICE,
+     .text_cb = ui_setting_autolock_text, .next_cb = ui_setting_autolock_next},
     {.name = "Vibrate on Call",  .icon = LV_SYMBOL_CALL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_vibrate_call, .get_cb = ui_setting_get_vibrate_call},
     {.name = "Vibrate on Text",  .icon = LV_SYMBOL_ENVELOPE, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_vibrate_text, .get_cb = ui_setting_get_vibrate_text},
     {.name = "Sound on Text",    .icon = LV_SYMBOL_VOLUME_MAX, .type=UI_SETTING_TYPE_SW, .set_cb = ui_setting_set_sound_text,  .get_cb = ui_setting_get_sound_text},
@@ -1292,6 +1294,10 @@ static void setting_scr_event(lv_event_t *e)
         case UI_SETTING_TYPE_SW:
             h->set_cb(!h->get_cb());
             lv_label_set_text_fmt(h->st, "%s", (h->get_cb() ? "ON" : "OFF"));
+            break;
+        case UI_SETTING_TYPE_CHOICE:
+            h->next_cb();
+            lv_label_set_text(h->st, h->text_cb());
             break;
         case UI_SETTING_TYPE_SUB:
             scr_mgr_push(h->sub_id, false);
@@ -1351,6 +1357,13 @@ static void setting_item_create(int curr_apge)
             lv_obj_set_style_text_font(h->st, FONT_BOLD_SIZE_15, LV_PART_MAIN);
             lv_obj_align(h->st, LV_ALIGN_RIGHT_MID, 0, 0);
             lv_label_set_text_fmt(h->st, "%s", (h->get_cb() ? "ON" : "OFF"));
+            break;
+        case UI_SETTING_TYPE_CHOICE:
+            h->obj = lv_list_add_btn(setting_list, h->icon, h->name);
+            h->st = lv_label_create(h->obj);
+            lv_obj_set_style_text_font(h->st, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+            lv_obj_align(h->st, LV_ALIGN_RIGHT_MID, 0, 0);
+            lv_label_set_text(h->st, h->text_cb());
             break;
         case UI_SETTING_TYPE_SUB:
             h->obj = lv_list_add_btn(setting_list, h->icon, h->name);
@@ -2963,9 +2976,15 @@ static void create8_1(lv_obj_t *parent)
     lv_label_set_text(scr8_1_status, "Calling...");
     lv_obj_align(scr8_1_status, LV_ALIGN_CENTER, 0, 20);
 
-    lv_obj_t *bar = scr_action_bar_create(parent, 44);
-    scr8_1_answer = scr_bar_btn_create(bar, LV_SYMBOL_CALL "  Answer", 106, scr8_1_answer_event, NULL);
-    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Hang up", 106, scr8_1_hangup_event, NULL);
+    /* Taller than a list row: these are the most urgent controls in the phone,
+     * and since a call raises this screen over a locked one they are often the
+     * first thing pressed after picking the phone up. */
+    lv_obj_t *bar = scr_action_bar_create(parent, 58);
+    scr8_1_answer = scr_bar_btn_create(bar, LV_SYMBOL_CALL "  Answer", 108, scr8_1_answer_event, NULL);
+    lv_obj_t *hangup = scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Hang up", 108, scr8_1_hangup_event, NULL);
+
+    lv_obj_set_height(scr8_1_answer, 48);
+    lv_obj_set_height(hangup, 48);
 
     scr_back_btn_create(parent, "Call", scr8_btn_event_cb);
 }
@@ -4267,9 +4286,19 @@ static void scr15_render(void)
     }
 
     int unread = sms_unread_total();
+
     if(unread > 0) {
-        lv_snprintf(detail, sizeof(detail), "%s\n\n%s %d unread\n\n%s %d%%",
+        /* Name whoever wrote last: a count on its own says something is
+         * waiting but not whether it is worth unlocking for. */
+        const char *from = NULL;
+        for(int i = sms_count() - 1; i >= 0 && from == NULL; i--) {
+            const sms_msg_t *m = sms_get(i);
+            if(m && m->unread) from = contacts_display_name(m->number);
+        }
+
+        lv_snprintf(detail, sizeof(detail), "%s\n\n%s %d unread\n%s%s\n\n%s %d%%",
                     date, LV_SYMBOL_ENVELOPE, unread,
+                    from ? "from " : "", from ? from : "",
                     ui_battert_27220_get_percent_level(), ui_battery_27220_get_percent());
     } else {
         lv_snprintf(detail, sizeof(detail), "%s\n\n%s %d%%",
@@ -4656,6 +4685,21 @@ static void phone_event_timer_cb(lv_timer_t *t)
             last_ring_buzz = lv_tick_get();
             ui_notify_incoming_call();
         }
+    }
+
+    /* Lock after a spell of nothing happening. lv_disp_get_inactive_time counts
+     * from the last touch or keypress, so it covers both.
+     *
+     * Never while a call is up, and never while the call screen is showing:
+     * locking the phone as it rings, or halfway through a conversation, is the
+     * worst possible moment for it. */
+    uint32_t autolock = ui_setting_get_autolock_ms();
+    if(autolock > 0 &&
+       call_state == MODEM_CALL_IDLE &&
+       scr_mgr_current_id() != SCREEN15_ID &&
+       scr_mgr_current_id() != SCREEN8_1_ID &&
+       lv_disp_get_inactive_time(NULL) > autolock) {
+        scr_mgr_switch(SCREEN15_ID, false);
     }
 
     last_call_state = call_state;

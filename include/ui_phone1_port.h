@@ -64,6 +64,13 @@ void ui_setting_set_sound_text(bool on);
 bool ui_setting_get_vibrate_call(void);
 bool ui_setting_get_vibrate_text(void);
 bool ui_setting_get_sound_text(void);
+/* How long the phone may sit untouched before it locks itself, in
+ * milliseconds; zero means never. Stepped through a few fixed values rather
+ * than typed in, since there is nowhere sensible to type a number. */
+uint32_t ui_setting_get_autolock_ms(void);
+const char *ui_setting_autolock_text(void);
+void ui_setting_autolock_next(void);
+
 /* Restores them from NVS. Call before the settings screen is built. */
 void ui_settings_load(void);
 

@@ -414,6 +414,9 @@ void ui_phone_vibrate(int ms)
 }
 
 //************************************[ notifications ]*************************
+static int autolock_choice;
+static void notify_save(void);
+
 static void notify_save(void)
 {
     Preferences prefs;
@@ -422,7 +425,40 @@ static void notify_save(void)
     prefs.putBool("vib_call", notify_vibrate_call);
     prefs.putBool("vib_text", notify_vibrate_text);
     prefs.putBool("snd_text", notify_sound_text);
+    prefs.putInt("autolock", autolock_choice);
     prefs.end();
+}
+
+/* The values the auto lock steps through. Off first, so a press from the
+ * default lands on the shortest useful delay rather than the longest. */
+static const struct {
+    uint32_t    ms;
+    const char *text;
+} autolock_choices[] = {
+    { 0,           "Off"   },
+    { 30 * 1000,   "30 s"  },
+    { 60 * 1000,   "1 min" },
+    { 120 * 1000,  "2 min" },
+    { 300 * 1000,  "5 min" },
+};
+
+uint32_t ui_setting_get_autolock_ms(void)
+{
+    return autolock_choices[autolock_choice].ms;
+}
+
+const char *ui_setting_autolock_text(void)
+{
+    return autolock_choices[autolock_choice].text;
+}
+
+void ui_setting_autolock_next(void)
+{
+    autolock_choice++;
+    if(autolock_choice >= (int)(sizeof(autolock_choices) / sizeof(autolock_choices[0]))) {
+        autolock_choice = 0;
+    }
+    notify_save();
 }
 
 void ui_settings_load(void)
@@ -433,10 +469,17 @@ void ui_settings_load(void)
     notify_vibrate_call = prefs.getBool("vib_call", notify_vibrate_call);
     notify_vibrate_text = prefs.getBool("vib_text", notify_vibrate_text);
     notify_sound_text   = prefs.getBool("snd_text", notify_sound_text);
+    autolock_choice     = prefs.getInt("autolock", autolock_choice);
     prefs.end();
 
-    Serial.printf("[NOTIFY] call buzz %d, text buzz %d, text sound %d\n",
-                  notify_vibrate_call, notify_vibrate_text, notify_sound_text);
+    if(autolock_choice < 0 ||
+       autolock_choice >= (int)(sizeof(autolock_choices) / sizeof(autolock_choices[0]))) {
+        autolock_choice = 0;
+    }
+
+    Serial.printf("[NOTIFY] call buzz %d, text buzz %d, text sound %d, auto lock %s\n",
+                  notify_vibrate_call, notify_vibrate_text, notify_sound_text,
+                  ui_setting_autolock_text());
 }
 
 void ui_setting_set_vibrate_call(bool on) { notify_vibrate_call = on; notify_save(); }
