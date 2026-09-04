@@ -15,6 +15,8 @@ extern "C" {
  *                                   DEFINES
  * *******************************************************************************/
 #define MODEM_OPERATOR_LEN 24
+// A UCS2 body is four hex characters per character of message.
+#define SMS_HEX_BODY_MAX   704
 
 /*********************************************************************************
  *                                  TYPEDEFS

@@ -21,7 +21,7 @@
 #define MODEM_LINE_MAX     256
 #define MODEM_REQ_QUEUE    6
 #define MODEM_RX_QUEUE     8
-#define MODEM_TASK_STACK   (1024 * 5)
+#define MODEM_TASK_STACK   (1024 * 6)
 
 // How often the task refreshes signal strength and registration.
 #define MODEM_STATUS_PERIOD_MS 15000
@@ -197,6 +197,100 @@ static bool urc_quoted_last(const char *line, char *out, int len)
     return n > 0;
 }
 
+/* Decodes a UCS2 message body into UTF-8.
+ *
+ * In text mode with CSCS="GSM" the modem hands back a body whose data coding
+ * scheme is UCS2 as a plain hex string, so anything the sender's phone could
+ * not fit in the GSM 7-bit alphabet arrives looking like "004C00690065...".
+ * Curly quotes and emoji both force that, which is why reaction messages in
+ * particular show up as hex.
+ *
+ * Returns false and leaves `out` alone if the input is not well formed UCS2. */
+static bool ucs2_hex_to_utf8(const char *hex, char *out, size_t out_len)
+{
+    size_t n = strlen(hex);
+    if(n < 4 || (n % 4) != 0) return false;
+
+    size_t o = 0;
+    for(size_t i = 0; i + 3 < n; i += 4) {
+        uint32_t cp = 0;
+
+        for(int k = 0; k < 4; k++) {
+            char c = hex[i + k];
+            if(c >= '0' && c <= '9')      cp = (cp << 4) | (uint32_t)(c - '0');
+            else if(c >= 'A' && c <= 'F') cp = (cp << 4) | (uint32_t)(c - 'A' + 10);
+            else if(c >= 'a' && c <= 'f') cp = (cp << 4) | (uint32_t)(c - 'a' + 10);
+            else return false;
+        }
+
+        // Anything above the BMP - every emoji - arrives as a surrogate pair.
+        if(cp >= 0xD800 && cp <= 0xDBFF) {
+            if(i + 7 >= n) return false;
+
+            uint32_t lo = 0;
+            for(int k = 4; k < 8; k++) {
+                char c = hex[i + k];
+                if(c >= '0' && c <= '9')      lo = (lo << 4) | (uint32_t)(c - '0');
+                else if(c >= 'A' && c <= 'F') lo = (lo << 4) | (uint32_t)(c - 'A' + 10);
+                else if(c >= 'a' && c <= 'f') lo = (lo << 4) | (uint32_t)(c - 'a' + 10);
+                else return false;
+            }
+            if(lo < 0xDC00 || lo > 0xDFFF) return false;
+
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+            i += 4;
+        } else if(cp >= 0xDC00 && cp <= 0xDFFF) {
+            return false; // a trailing surrogate with nothing in front of it
+        }
+
+        if(cp < 0x80) {
+            if(o + 1 >= out_len) break;
+            out[o++] = (char)cp;
+        } else if(cp < 0x800) {
+            if(o + 2 >= out_len) break;
+            out[o++] = (char)(0xC0 | (cp >> 6));
+            out[o++] = (char)(0x80 | (cp & 0x3F));
+        } else if(cp < 0x10000) {
+            if(o + 3 >= out_len) break;
+            out[o++] = (char)(0xE0 | (cp >> 12));
+            out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            out[o++] = (char)(0x80 | (cp & 0x3F));
+        } else {
+            if(o + 4 >= out_len) break;
+            out[o++] = (char)(0xF0 | (cp >> 18));
+            out[o++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+            out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            out[o++] = (char)(0x80 | (cp & 0x3F));
+        }
+    }
+
+    out[o] = '\0';
+    return true;
+}
+
+/* Fallback for firmwares that do not report the data coding scheme.
+ *
+ * Requires a hex letter as well as the right shape, so that a message whose
+ * whole body is digits - a one time code, say - is not mistaken for UCS2 and
+ * turned into nonsense. Real UCS2 text almost always carries one. */
+static bool looks_like_ucs2_hex(const char *s)
+{
+    size_t n = strlen(s);
+    if(n < 4 || (n % 4) != 0) return false;
+
+    bool has_letter = false;
+    for(size_t i = 0; i < n; i++) {
+        char c = s[i];
+        if(c >= '0' && c <= '9') continue;
+        if((c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
+            has_letter = true;
+            continue;
+        }
+        return false;
+    }
+    return has_letter;
+}
+
 /* A modem timestamp, converted to UTC. */
 typedef struct {
     int  year, mon, day;
@@ -237,6 +331,57 @@ static bool parse_modem_stamp(const char *stamp, modem_stamp_t *out)
     out->min  = utc_minutes % 60;
     out->sec  = sec;
     return true;
+}
+
+/* Pulls the sender, the timestamp and the data coding scheme out of a +CMGR
+ * header:
+ *
+ *   +CMGR: "REC READ","+614...",,"25/09/04,10:22:33+40",145,4,0,8,"+614...",145,7
+ *
+ * With CSDH=1 the tail after the timestamp carries <tooa>,<fo>,<pid>,<dcs> and
+ * then a second quoted field, the service centre number - which is why the
+ * timestamp is found by its shape rather than by being the last quoted field.
+ *
+ * `dcs` comes back as -1 when the firmware reported none. */
+static void parse_cmgr_header(const char *line, char *number, int number_len,
+                              char *stamp, int stamp_len, int *dcs)
+{
+    number[0] = '\0';
+    stamp[0]  = '\0';
+    *dcs      = -1;
+
+    urc_quoted_field(line, 1, number, number_len);
+
+    for(int i = 0; i < 6; i++) {
+        char field[40];
+        int  a, b, c, d, e, f;
+
+        if(!urc_quoted_field(line, i, field, sizeof(field))) break;
+        if(sscanf(field, "%d/%d/%d,%d:%d:%d", &a, &b, &c, &d, &e, &f) != 6) continue;
+
+        strncpy(stamp, field, stamp_len - 1);
+        stamp[stamp_len - 1] = '\0';
+
+        const char *p = strstr(line, field);
+        if(p == NULL) break;
+        p += strlen(field);
+        if(*p == '"') p++;
+
+        // ,<tooa>,<fo>,<pid>,<dcs> - the fourth comma is the one before dcs.
+        int commas = 0;
+        while(*p) {
+            if(*p == '"') break; // reached the service centre, so no dcs here
+            if(*p == ',') {
+                if(++commas == 4) {
+                    p++;
+                    if(isdigit((unsigned char)*p)) *dcs = atoi(p);
+                    break;
+                }
+            }
+            p++;
+        }
+        break;
+    }
 }
 
 /* Epoch seconds for a +CMGR service centre timestamp. Returns 0 when the stamp
@@ -316,8 +461,11 @@ static void sms_fetch(int index)
     char cmd[32];
     char line[MODEM_LINE_MAX];
     char number[CONTACT_NUMBER_LEN] = {0};
-    char stamp[32] = {0};
-    char body[SMS_TEXT_LEN] = {0};
+    char stamp[40] = {0};
+    // Room for a UCS2 body, which arrives as four hex characters per character
+    // of actual message.
+    char body[SMS_HEX_BODY_MAX] = {0};
+    int  dcs = -1;
     bool have_header = false;
     bool have_body   = false;
 
@@ -334,9 +482,7 @@ static void sms_fetch(int index)
         if(strcmp(line, cmd) == 0) continue;
 
         if(strncmp(line, "+CMGR:", 6) == 0) {
-            // +CMGR: "REC UNREAD","+61412345678",,"25/09/04,10:22:33+40"
-            urc_quoted_field(line, 1, number, sizeof(number));
-            urc_quoted_last(line, stamp, sizeof(stamp));
+            parse_cmgr_header(line, number, sizeof(number), stamp, sizeof(stamp), &dcs);
             have_header = true;
             continue;
         }
@@ -344,7 +490,7 @@ static void sms_fetch(int index)
         if(have_header && !have_body) {
             // The line straight after the header is the body whatever it says,
             // so a message that reads "OK" is not mistaken for the result code.
-            strncpy(body, line, SMS_TEXT_LEN - 1);
+            strncpy(body, line, sizeof(body) - 1);
             have_body = true;
             continue;
         }
@@ -354,15 +500,23 @@ static void sms_fetch(int index)
         if(have_header) {
             // Multi-line body: keep the newlines the sender wrote.
             int used = strlen(body);
-            if(used < SMS_TEXT_LEN - 2) {
+            if(used < (int)sizeof(body) - 2) {
                 body[used] = '\n';
-                strncpy(body + used + 1, line, SMS_TEXT_LEN - used - 2);
+                strncpy(body + used + 1, line, sizeof(body) - used - 2);
             }
         }
     }
 
     if(have_header && number[0]) {
-        sms_deliver(number, body, parse_sms_timestamp(stamp));
+        // Bits 3..2 of the data coding scheme select the alphabet; 10 is UCS2.
+        bool ucs2 = (dcs >= 0) ? ((dcs & 0x0C) == 0x08) : looks_like_ucs2_hex(body);
+
+        char decoded[SMS_TEXT_LEN];
+        if(ucs2 && ucs2_hex_to_utf8(body, decoded, sizeof(decoded))) {
+            sms_deliver(number, decoded, parse_sms_timestamp(stamp));
+        } else {
+            sms_deliver(number, body, parse_sms_timestamp(stamp));
+        }
     }
 
     snprintf(cmd, sizeof(cmd), "AT+CMGD=%d", index);

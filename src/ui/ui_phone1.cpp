@@ -2451,6 +2451,120 @@ static void ui_format_stamp(char *buf, int len, uint32_t ts)
     }
 }
 
+/* Recognising the message another phone sends when someone reacts to one of
+ * ours.
+ *
+ * SMS has no reaction protocol. The reacting phone simply sends a sentence that
+ * quotes the message it refers to - and the curly quotes and emoji it uses are
+ * exactly what push the whole thing out of the GSM alphabet into UCS2, which is
+ * why these arrive as hex before the modem layer decodes them.
+ *
+ * So this is pattern matching on what the common phones actually send, and it
+ * is best effort: anything not recognised is shown as the ordinary message it
+ * appears to be. */
+static const struct {
+    const char *prefix;
+    const char *word;
+} reaction_prefixes[] = {
+    { "Laughed at ", "Laughed at" },
+    { "Emphasized ", "Emphasised" },
+    { "Emphasised ", "Emphasised" },
+    { "Questioned ", "Questioned" },
+    { "Disliked ",   "Disliked"   },
+    { "Liked ",      "Liked"      },
+    { "Loved ",      "Loved"      },
+    { "Removed ",    "Removed a reaction from" },
+};
+
+/* Written as byte escapes rather than literal characters so the mapping does
+ * not depend on this file's encoding. None of these have glyphs in the fonts on
+ * this device, which is the other reason to turn them into words. */
+static const struct {
+    const char *utf8;
+    const char *word;
+} reaction_emoji[] = {
+    { "\xF0\x9F\x91\x8D", "Liked"      }, // thumbs up
+    { "\xF0\x9F\x91\x8E", "Disliked"   }, // thumbs down
+    { "\xE2\x9D\xA4",     "Loved"      }, // heart
+    { "\xF0\x9F\x98\x82", "Laughed at" }, // tears of joy
+    { "\xE2\x80\xBC",     "Emphasised" }, // double exclamation
+    { "\xE2\x9D\x93",     "Questioned" }, // question mark
+};
+
+/* Copies out the text between the first opening quote and the last closing one.
+ * Phones use curly quotes, three bytes each in UTF-8; straight ones are taken
+ * as well. `open_at` receives where the opening quote started. */
+static bool ui_quoted_span(const char *s, char *out, int out_len, const char **open_at)
+{
+    const char *open = NULL;
+    const char *close = NULL;
+
+    for(const char *p = s; *p; p++) {
+        if((unsigned char)p[0] == 0xE2 && (unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0x9C) {
+            if(open_at) *open_at = p;
+            open = p + 3;
+            break;
+        }
+        if(*p == '"') {
+            if(open_at) *open_at = p;
+            open = p + 1;
+            break;
+        }
+    }
+    if(open == NULL) return false;
+
+    for(const char *p = open; *p; p++) {
+        if((unsigned char)p[0] == 0xE2 && (unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0x9D) close = p;
+        else if(*p == '"') close = p;
+    }
+    if(close == NULL || close <= open) return false;
+
+    int n = 0;
+    while(open < close && n < out_len - 1) out[n++] = *open++;
+    out[n] = '\0';
+    return n > 0;
+}
+
+static bool ui_reaction_parse(const char *text, char *verb, int verb_len,
+                              char *quoted, int quoted_len)
+{
+    if(text == NULL || text[0] == '\0') return false;
+
+    const char *open_at = NULL;
+    char        raw[SMS_TEXT_LEN];
+
+    if(!ui_quoted_span(text, raw, sizeof(raw), &open_at)) return false;
+
+    for(int i = 0; i < (int)GET_BUFF_LEN(reaction_prefixes); i++) {
+        if(strncmp(text, reaction_prefixes[i].prefix, strlen(reaction_prefixes[i].prefix)) != 0) continue;
+
+        lv_snprintf(verb, verb_len, "%s", reaction_prefixes[i].word);
+        ui_message_snippet(quoted, quoted_len, raw);
+        return true;
+    }
+
+    /* The other shape is an emoji followed by ` to "..."`. Both conditions are
+     * needed: an ordinary message can easily contain ` to ` and a quote, but not
+     * while also starting with an emoji. */
+    if((unsigned char)text[0] < 0x80) return false;
+
+    const char *to = strstr(text, " to ");
+    if(to == NULL || open_at == NULL || to > open_at) return false;
+
+    const char *word = "Reacted to";
+    for(int i = 0; i < (int)GET_BUFF_LEN(reaction_emoji); i++) {
+        if(strstr(text, reaction_emoji[i].utf8) != NULL) {
+            word = reaction_emoji[i].word;
+            break;
+        }
+    }
+
+    lv_snprintf(verb, verb_len, "%s", word);
+    ui_message_snippet(quoted, quoted_len, raw);
+    return true;
+}
+
+
 #endif
 //************************************[ screen 8 ]****************************************** dialer
 #if 1
@@ -3075,7 +3189,14 @@ static void scr13_populate(void)
                     contacts_display_name(number));
 
         // A row previews the conversation; the whole message is one tap away.
-        ui_message_snippet(snippet, sizeof(snippet), last ? last->text : "");
+        char reaction[24];
+        char quoted[SMS_TEXT_LEN];
+        if(last && ui_reaction_parse(last->text, reaction, sizeof(reaction),
+                                     quoted, sizeof(quoted))) {
+            lv_snprintf(snippet, sizeof(snippet), "%s \"%s\"", reaction, quoted);
+        } else {
+            ui_message_snippet(snippet, sizeof(snippet), last ? last->text : "");
+        }
         if(last && last->dir == SMS_DIR_OUT) {
             // Without a prefix a thread you last replied to reads as if they
             // said it. The delivery state goes here too: sending returns to
@@ -3256,6 +3377,7 @@ static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, in
 {
     char head[48];
     char stamp[16];
+    char body[SMS_TEXT_LEN];
 
     ui_format_stamp(stamp, sizeof(stamp), m->ts);
 
@@ -3268,12 +3390,30 @@ static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, in
         lv_snprintf(head, sizeof(head), "%s", stamp);
     }
 
+    /* A reaction is shown as a short annotation rather than a message: the text
+     * a phone sends for one quotes the message it refers to in full, which is
+     * already sitting a line or two above in the conversation. */
+    char reaction[24];
+    char quoted[SMS_TEXT_LEN];
+    bool is_reaction = ui_reaction_parse(m->text, reaction, sizeof(reaction),
+                                         quoted, sizeof(quoted));
+
+    if(is_reaction) {
+        // Enough of the excerpt to tell which message it was about.
+        if(strlen(quoted) > 28) lv_snprintf(quoted + 25, 4, "...");
+        lv_snprintf(body, sizeof(body), "%s \"%s\"", reaction, quoted);
+    } else {
+        lv_snprintf(body, sizeof(body), "%s", m->text);
+    }
+
     lv_obj_t *bubble = lv_obj_create(parent);
     lv_obj_set_width(bubble, 180);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(bubble, DECKPRO_COLOR_BG, LV_PART_MAIN);
     lv_obj_set_style_border_color(bubble, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(bubble, 1, LV_PART_MAIN);
+    // No outline on a reaction, so it reads as a note against the conversation
+    // rather than as another message in it.
+    lv_obj_set_style_border_width(bubble, is_reaction ? 0 : 1, LV_PART_MAIN);
     lv_obj_set_style_radius(bubble, 8, LV_PART_MAIN);
     lv_obj_set_style_pad_all(bubble, 5, LV_PART_MAIN);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
@@ -3289,7 +3429,7 @@ static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, in
     lv_obj_set_style_text_font(text, FONT_BOLD_SIZE_15, LV_PART_MAIN);
     lv_obj_set_style_text_color(text, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-    lv_label_set_text_fmt(text, "%s\n%s", head, m->text);
+    lv_label_set_text_fmt(text, "%s\n%s", head, body);
     if(m->dir == SMS_DIR_OUT) {
         lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     }
@@ -3414,11 +3554,11 @@ static void scr13_2_send_event(lv_event_t *e)
 
     const char *body = lv_textarea_get_text(scr13_2_body_ta);
 
-    if(ui_active_number[0] == ' ') {
+    if(ui_active_number[0] == '\0') {
         lv_label_set_text(scr13_2_status, "Choose who to send to first");
         return;
     }
-    if(body == NULL || body[0] == ' ') {
+    if(body == NULL || body[0] == '\0') {
         lv_label_set_text(scr13_2_status, "Nothing to send");
         return;
     }
@@ -3462,7 +3602,7 @@ static void create13_2(lv_obj_t *parent)
     scr13_2_update_to();
 
     scr13_2_body_ta = lv_textarea_create(parent);
-    lv_textarea_set_max_length(scr13_2_body_ta, SMS_TEXT_LEN - 1);
+    lv_textarea_set_max_length(scr13_2_body_ta, SMS_COMPOSE_MAX);
     lv_textarea_set_placeholder_text(scr13_2_body_ta, "Message");
     lv_obj_set_size(scr13_2_body_ta, lv_pct(92), 148);
     lv_obj_set_style_text_font(scr13_2_body_ta, FONT_BOLD_SIZE_15, LV_PART_MAIN);

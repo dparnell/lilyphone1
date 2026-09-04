@@ -17,7 +17,13 @@ extern "C" {
 #define CONTACT_NUMBER_LEN  24
 #define CONTACTS_MAX        64
 
-#define SMS_TEXT_LEN        161 // one concatenated GSM-7 segment plus terminator
+/* Storage is UTF-8, so a message that arrived as UCS2 needs room for multi
+ * byte characters - an emoji is four. Sized for a full length message that is
+ * mostly non-ASCII rather than for the 160 GSM-7 characters it started as. */
+#define SMS_TEXT_LEN        321
+/* What the composer lets the user type. Outgoing messages go out as one
+ * segment, so this stays at the GSM-7 limit even though storage is larger. */
+#define SMS_COMPOSE_MAX     160
 #define SMS_MAX             120
 
 // sms_msg_t::dir

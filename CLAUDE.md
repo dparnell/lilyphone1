@@ -43,6 +43,12 @@ A symbol also works as an image source: `lv_list_add_btn(list, LV_SYMBOL_X, text
 
 Message bodies additionally carry the sender's own line breaks, so anything rendering one on a single line must flatten it first (`ui_message_snippet()` in `ui_phone1.cpp`).
 
+### Incoming SMS text is not always plain text
+
+In text mode with `CSCS="GSM"`, a message whose data coding scheme is UCS2 arrives as a **hex string** — anything the sender could not fit in the GSM 7-bit alphabet, including curly quotes and every emoji. `sms_fetch()` decodes it (`ucs2_hex_to_utf8`, surrogate pairs included) using the `<dcs>` that `AT+CSDH=1` adds to the `+CMGR` header, falling back to a shape heuristic that deliberately requires a hex letter so an all-digits one-time code is not mangled. Enabling CSDH is also why the timestamp is now found by its shape rather than as the last quoted field — CSDH appends the service centre number after it.
+
+Storage is therefore UTF-8 and `SMS_TEXT_LEN` (321) is sized for decoded multi-byte text, while `SMS_COMPOSE_MAX` (160) is what the composer allows for a single outgoing segment. Note the device fonts have no emoji glyphs, so a decoded emoji still draws a placeholder box; reaction messages sidestep that by being mapped to words (`ui_reaction_parse()`).
+
 ## Architecture
 
 ### Display: everything is e-paper
