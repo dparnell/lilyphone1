@@ -4159,6 +4159,48 @@ static const struct {
     { "Sound on Text",    LV_SYMBOL_VOLUME_MAX, ui_setting_set_sound_text,   ui_setting_get_sound_text   },
 };
 
+static lv_obj_t *scr14_state_of(lv_obj_t *row)
+{
+    // The value label is the row's last child, added right after the row.
+    return lv_obj_get_child(row, lv_obj_get_child_cnt(row) - 1);
+}
+
+/* One row of the shade: an icon, a name, and its current value on the right. */
+static lv_obj_t *scr14_row_create(const char *icon, const char *name, const char *value,
+                                  lv_event_cb_t cb, void *user_data)
+{
+    lv_obj_t *row = lv_list_add_btn(scr14_list, icon, name);
+
+    lv_obj_set_height(row, 34);
+    lv_obj_set_style_text_font(row, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(row, 1, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
+
+    lv_obj_t *state = lv_label_create(row);
+    lv_obj_set_style_text_font(state, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_label_set_text(state, value);
+
+    lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, user_data);
+    return row;
+}
+
+/* Auto lock is here as well as in the settings screen. This is where the
+ * manual lock button is, so it is where someone looks to find out how long the
+ * phone waits before doing it by itself. */
+static void scr14_autolock_event(lv_event_t *e)
+{
+    ui_setting_autolock_next();
+
+    lv_obj_t *state = scr14_state_of((lv_obj_t *)lv_event_get_target(e));
+    if(state) lv_label_set_text(state, ui_setting_autolock_text());
+
+    ui_disp_full_refr();
+}
+
 static void scr14_back_event(lv_event_t *e)
 {
     if(e->code == LV_EVENT_CLICKED) {
@@ -4173,9 +4215,7 @@ static void scr14_toggle_event(lv_event_t *e)
 
     scr14_toggles[idx].set(!scr14_toggles[idx].get());
 
-    // The state label is the row's last child, added right after the row.
-    lv_obj_t *row = (lv_obj_t *)lv_event_get_target(e);
-    lv_obj_t *state = lv_obj_get_child(row, lv_obj_get_child_cnt(row) - 1);
+    lv_obj_t *state = scr14_state_of((lv_obj_t *)lv_event_get_target(e));
     if(state) lv_label_set_text(state, scr14_toggles[idx].get() ? "ON" : "OFF");
 
     ui_disp_full_refr();
@@ -4208,23 +4248,13 @@ static void create14(lv_obj_t *parent)
     lv_obj_set_style_shadow_width(scr14_list, 0, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(scr14_list, LV_SCROLLBAR_MODE_OFF);
 
+    scr14_row_create(LV_SYMBOL_POWER, "Auto Lock", ui_setting_autolock_text(),
+                     scr14_autolock_event, NULL);
+
     for(int i = 0; i < (int)GET_BUFF_LEN(scr14_toggles); i++) {
-        lv_obj_t *row = lv_list_add_btn(scr14_list, scr14_toggles[i].icon, scr14_toggles[i].name);
-
-        lv_obj_set_height(row, 34);
-        lv_obj_set_style_text_font(row, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
-        lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
-        lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
-        lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-        lv_obj_set_style_outline_width(row, 1, LV_PART_MAIN | LV_STATE_PRESSED);
-        lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
-
-        lv_obj_t *state = lv_label_create(row);
-        lv_obj_set_style_text_font(state, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-        lv_label_set_text(state, scr14_toggles[i].get() ? "ON" : "OFF");
-
-        lv_obj_add_event_cb(row, scr14_toggle_event, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        scr14_row_create(scr14_toggles[i].icon, scr14_toggles[i].name,
+                         scr14_toggles[i].get() ? "ON" : "OFF",
+                         scr14_toggle_event, (void *)(intptr_t)i);
     }
 
     scr_back_btn_create(parent, "Quick settings", scr14_back_event);
