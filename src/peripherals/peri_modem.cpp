@@ -712,28 +712,48 @@ static bool sms_send_body(const char *number, const char *text, bool ucs2)
         }
     }
 
+    /* Text mode, every time. In PDU mode AT+CMGS takes a length rather than a
+     * quoted number, so the command below would be a syntax error and the
+     * prompt would never come - a nasty way to lose messages if anything has
+     * reset the modem since it was configured. */
+    modem_exec("AT+CMGF=1", NULL, 0, 2000);
+
     while(SerialAT.available()) SerialAT.read();
 
+    /* Terminated with CR alone: the LF that modem_write_line would add lands
+     * after the modem has switched to accepting the message body, where it
+     * would become the first character of the message. */
     snprintf(cmd, sizeof(cmd), "AT+CMGS=\"%s\"", number);
-    modem_write_line(cmd);
+    SerialAT.print(cmd);
+    SerialAT.print("\r");
 
-    // Wait for the prompt.
+    /* Wait for the '>' prompt, keeping anything else the modem says on the way
+     * so that a failure can be explained instead of merely reported. */
+    char     reply[MODEM_LINE_MAX];
+    int      reply_len = 0;
     uint32_t start = millis();
-    bool prompt = false;
-    while(millis() - start < 5000 && !prompt) {
+    bool     prompt = false;
+
+    while(millis() - start < 10000 && !prompt) {
         while(SerialAT.available()) {
-            if((char)SerialAT.read() == '>') {
+            char c = (char)SerialAT.read();
+            if(c == '>') {
                 prompt = true;
                 break;
+            }
+            if(c != '\r' && c != '\n' && reply_len < (int)sizeof(reply) - 1) {
+                reply[reply_len++] = c;
             }
         }
         if(!prompt) vTaskDelay(pdMS_TO_TICKS(10));
     }
+    reply[reply_len] = '\0';
 
     bool sent = false;
 
     if(!prompt) {
-        Serial.println("[MODEM] no send prompt");
+        Serial.printf("[MODEM] no send prompt; modem said: %s\n",
+                      reply[0] ? reply : "(nothing at all)");
         // Abort the half-issued command so the modem does not stay in text mode.
         SerialAT.write(0x1B);
     } else {
@@ -762,6 +782,8 @@ static bool sms_send_body(const char *number, const char *text, bool ucs2)
     // sent as UCS2 by accident.
     if(ucs2) modem_exec("AT+CSMP=17,167,0,0", NULL, 0, 2000);
 
+    Serial.printf("[MODEM] %s send %s\n", ucs2 ? "UCS2" : "GSM-7",
+                  sent ? "accepted by the network" : "failed");
     return sent;
 }
 
