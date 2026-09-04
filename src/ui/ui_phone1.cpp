@@ -2452,7 +2452,8 @@ static void ui_format_stamp(char *buf, int len, uint32_t ts)
 }
 
 /* Recognising the message another phone sends when someone reacts to one of
- * ours.
+ * ours, so it can be shown attached to the message it is about rather than as
+ * a message in its own right.
  *
  * SMS has no reaction protocol. The reacting phone simply sends a sentence that
  * quotes the message it refers to - and the curly quotes and emoji it uses are
@@ -2462,34 +2463,50 @@ static void ui_format_stamp(char *buf, int len, uint32_t ts)
  * So this is pattern matching on what the common phones actually send, and it
  * is best effort: anything not recognised is shown as the ordinary message it
  * appears to be. */
+typedef struct {
+    char        emoji[8];             // glyph for the badge on the target
+    const char *word;                 // wording when there is no target to pin it to
+    char        quoted[SMS_TEXT_LEN]; // the excerpt naming the target
+    bool        removal;              // a reaction being taken back
+} ui_reaction_t;
+
 static const struct {
     const char *prefix;
     const char *word;
+    const char *emoji;
 } reaction_prefixes[] = {
-    { "Laughed at ", "Laughed at" },
-    { "Emphasized ", "Emphasised" },
-    { "Emphasised ", "Emphasised" },
-    { "Questioned ", "Questioned" },
-    { "Disliked ",   "Disliked"   },
-    { "Liked ",      "Liked"      },
-    { "Loved ",      "Loved"      },
-    { "Removed ",    "Removed a reaction from" },
+    { "Laughed at ", "Laughed at", "\xF0\x9F\x98\x82" }, // tears of joy
+    { "Emphasized ", "Emphasised", "\xE2\x80\xBC"     }, // double exclamation
+    { "Emphasised ", "Emphasised", "\xE2\x80\xBC"     },
+    { "Questioned ", "Questioned", "\xE2\x9D\x93"     }, // question mark
+    { "Disliked ",   "Disliked",   "\xF0\x9F\x91\x8E" }, // thumbs down
+    { "Liked ",      "Liked",      "\xF0\x9F\x91\x8D" }, // thumbs up
+    { "Loved ",      "Loved",      "\xE2\x9D\xA4"     }, // heart
+    { "Removed ",    "Removed a reaction from", ""    },
 };
 
 /* Written as byte escapes rather than literal characters so the mapping does
- * not depend on this file's encoding. None of these have glyphs in the fonts on
- * this device, which is the other reason to turn them into words. */
+ * not depend on this file's encoding. */
 static const struct {
     const char *utf8;
     const char *word;
 } reaction_emoji[] = {
-    { "\xF0\x9F\x91\x8D", "Liked"      }, // thumbs up
-    { "\xF0\x9F\x91\x8E", "Disliked"   }, // thumbs down
-    { "\xE2\x9D\xA4",     "Loved"      }, // heart
-    { "\xF0\x9F\x98\x82", "Laughed at" }, // tears of joy
-    { "\xE2\x80\xBC",     "Emphasised" }, // double exclamation
-    { "\xE2\x9D\x93",     "Questioned" }, // question mark
+    { "\xF0\x9F\x91\x8D", "Liked"      },
+    { "\xF0\x9F\x91\x8E", "Disliked"   },
+    { "\xE2\x9D\xA4",     "Loved"      },
+    { "\xF0\x9F\x98\x82", "Laughed at" },
+    { "\xE2\x80\xBC",     "Emphasised" },
+    { "\xE2\x9D\x93",     "Questioned" },
 };
+
+static int ui_utf8_seq_len(unsigned char c)
+{
+    if(c < 0x80) return 1;
+    if((c & 0xE0) == 0xC0) return 2;
+    if((c & 0xF0) == 0xE0) return 3;
+    if((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
 
 /* Copies out the text between the first opening quote and the last closing one.
  * Phones use curly quotes, three bytes each in UTF-8; straight ones are taken
@@ -2525,21 +2542,21 @@ static bool ui_quoted_span(const char *s, char *out, int out_len, const char **o
     return n > 0;
 }
 
-static bool ui_reaction_parse(const char *text, char *verb, int verb_len,
-                              char *quoted, int quoted_len)
+static bool ui_reaction_parse(const char *text, ui_reaction_t *out)
 {
     if(text == NULL || text[0] == '\0') return false;
 
     const char *open_at = NULL;
-    char        raw[SMS_TEXT_LEN];
 
-    if(!ui_quoted_span(text, raw, sizeof(raw), &open_at)) return false;
+    memset(out, 0, sizeof(*out));
+    if(!ui_quoted_span(text, out->quoted, sizeof(out->quoted), &open_at)) return false;
 
     for(int i = 0; i < (int)GET_BUFF_LEN(reaction_prefixes); i++) {
         if(strncmp(text, reaction_prefixes[i].prefix, strlen(reaction_prefixes[i].prefix)) != 0) continue;
 
-        lv_snprintf(verb, verb_len, "%s", reaction_prefixes[i].word);
-        ui_message_snippet(quoted, quoted_len, raw);
+        out->word    = reaction_prefixes[i].word;
+        out->removal = (reaction_prefixes[i].emoji[0] == '\0');
+        lv_snprintf(out->emoji, sizeof(out->emoji), "%s", reaction_prefixes[i].emoji);
         return true;
     }
 
@@ -2551,19 +2568,49 @@ static bool ui_reaction_parse(const char *text, char *verb, int verb_len,
     const char *to = strstr(text, " to ");
     if(to == NULL || open_at == NULL || to > open_at) return false;
 
-    const char *word = "Reacted to";
+    // Show whatever glyph they actually sent - the emoji font can draw it even
+    // when it is not one of the six the named reactions map to.
+    int seq = ui_utf8_seq_len((unsigned char)text[0]);
+    if(seq >= (int)sizeof(out->emoji)) seq = (int)sizeof(out->emoji) - 1;
+    memcpy(out->emoji, text, seq);
+    out->emoji[seq] = '\0';
+
+    out->word = "Reacted to";
     for(int i = 0; i < (int)GET_BUFF_LEN(reaction_emoji); i++) {
         if(strstr(text, reaction_emoji[i].utf8) != NULL) {
-            word = reaction_emoji[i].word;
+            out->word = reaction_emoji[i].word;
             break;
         }
     }
-
-    lv_snprintf(verb, verb_len, "%s", word);
-    ui_message_snippet(quoted, quoted_len, raw);
     return true;
 }
 
+/* Does `message` look like the message a reaction quoted?
+ *
+ * Both sides are flattened first, because the quote comes back with the
+ * sender's line breaks collapsed, and a long message is quoted only as far as
+ * the sending phone chose to - so this is a prefix test with any trailing
+ * ellipsis removed rather than an equality test. */
+static bool ui_reaction_matches(const char *message, const char *quoted)
+{
+    char a[SMS_TEXT_LEN];
+    char b[SMS_TEXT_LEN];
+
+    ui_message_snippet(a, sizeof(a), message);
+    ui_message_snippet(b, sizeof(b), quoted);
+
+    int n = (int)strlen(b);
+    if(n >= 3 && (unsigned char)b[n - 3] == 0xE2 &&
+       (unsigned char)b[n - 2] == 0x80 && (unsigned char)b[n - 1] == 0xA6) {
+        n -= 3; // U+2026 horizontal ellipsis
+    }
+    while(n > 0 && (b[n - 1] == '.' || b[n - 1] == ' ')) n--;
+
+    // Too short to be sure it names one message rather than any of them.
+    if(n < 4) return false;
+
+    return strncmp(a, b, (size_t)n) == 0;
+}
 
 #endif
 //************************************[ screen 8 ]****************************************** dialer
@@ -3189,11 +3236,10 @@ static void scr13_populate(void)
                     contacts_display_name(number));
 
         // A row previews the conversation; the whole message is one tap away.
-        char reaction[24];
-        char quoted[SMS_TEXT_LEN];
-        if(last && ui_reaction_parse(last->text, reaction, sizeof(reaction),
-                                     quoted, sizeof(quoted))) {
-            lv_snprintf(snippet, sizeof(snippet), "%s \"%s\"", reaction, quoted);
+        ui_reaction_t reaction;
+        if(last && ui_reaction_parse(last->text, &reaction)) {
+            lv_snprintf(snippet, sizeof(snippet), "%s %s \"%s\"",
+                        reaction.emoji, reaction.word, reaction.quoted);
         } else {
             ui_message_snippet(snippet, sizeof(snippet), last ? last->text : "");
         }
@@ -3373,7 +3419,7 @@ static void scr13_1_delete_event(lv_event_t *e)
  * because this build of LVGL has no margin properties to offset one child
  * against the rest. */
 static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, int log_idx,
-                                        lv_coord_t y)
+                                        lv_coord_t y, const char *badge)
 {
     char head[48];
     char stamp[16];
@@ -3390,18 +3436,16 @@ static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, in
         lv_snprintf(head, sizeof(head), "%s", stamp);
     }
 
-    /* A reaction is shown as a short annotation rather than a message: the text
-     * a phone sends for one quotes the message it refers to in full, which is
-     * already sitting a line or two above in the conversation. */
-    char reaction[24];
-    char quoted[SMS_TEXT_LEN];
-    bool is_reaction = ui_reaction_parse(m->text, reaction, sizeof(reaction),
-                                         quoted, sizeof(quoted));
+    /* A reaction only lands here when its target is not on screen - normally it
+     * is drawn as a badge on the message it refers to instead. Shown as a short
+     * annotation, since the text a phone sends quotes that message in full. */
+    ui_reaction_t reaction;
+    bool is_reaction = ui_reaction_parse(m->text, &reaction);
 
     if(is_reaction) {
         // Enough of the excerpt to tell which message it was about.
-        if(strlen(quoted) > 28) lv_snprintf(quoted + 25, 4, "...");
-        lv_snprintf(body, sizeof(body), "%s \"%s\"", reaction, quoted);
+        if(strlen(reaction.quoted) > 28) lv_snprintf(reaction.quoted + 25, 4, "...");
+        lv_snprintf(body, sizeof(body), "%s \"%s\"", reaction.word, reaction.quoted);
     } else {
         lv_snprintf(body, sizeof(body), "%s", m->text);
     }
@@ -3436,7 +3480,37 @@ static lv_coord_t scr13_1_bubble_create(lv_obj_t *parent, const sms_msg_t *m, in
 
     // The height only exists once the wrapped text has been laid out.
     lv_obj_update_layout(bubble);
-    return y + lv_obj_get_height(bubble) + 6;
+    lv_coord_t bubble_h = lv_obj_get_height(bubble);
+    lv_coord_t extra    = 0;
+
+    /* The reactions somebody sent for this message, hanging off its lower inner
+     * corner the way a phone shows them. A sibling rather than a child, so it
+     * can overhang the bubble instead of being clipped inside it. */
+    if(badge && badge[0]) {
+        lv_coord_t bubble_x = lv_obj_get_x(bubble);
+        lv_coord_t bubble_w = lv_obj_get_width(bubble);
+
+        lv_obj_t *tag = lv_obj_create(parent);
+        lv_obj_set_size(tag, 26, 20);
+        lv_obj_set_style_bg_color(tag, DECKPRO_COLOR_BG, LV_PART_MAIN);
+        lv_obj_set_style_border_color(tag, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_border_width(tag, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(tag, 10, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(tag, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(tag, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_pos(tag, m->dir == SMS_DIR_OUT ? bubble_x + 2 : bubble_x + bubble_w - 28,
+                       y + bubble_h - 10);
+
+        lv_obj_t *glyph = lv_label_create(tag);
+        lv_obj_set_style_text_font(glyph, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+        lv_obj_set_style_text_color(glyph, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_label_set_text(glyph, badge);
+        lv_obj_center(glyph);
+
+        extra = 12; // room for the part that hangs below the bubble
+    }
+
+    return y + bubble_h + extra + 6;
 }
 
 static void scr13_1_populate(void)
@@ -3450,11 +3524,50 @@ static void scr13_1_populate(void)
         scr_empty_note_create(scr13_1_cont, "No messages in this conversation.");
     }
 
+    /* Work out which of these are reactions before drawing anything, so each
+     * one can be pinned to the message it names instead of taking a line of its
+     * own. A reaction quotes its target, so the target is the nearest earlier
+     * message the quote matches.
+     *
+     * One that finds no target - because the message it refers to has scrolled
+     * out of the window, or came from a phone whose wording is not recognised -
+     * falls through and is drawn as an ordinary annotation. */
+    char badges[SCR13_1_MAX_BUBBLES][8];
+    bool attached[SCR13_1_MAX_BUBBLES];
+
+    memset(badges, 0, sizeof(badges));
+    memset(attached, 0, sizeof(attached));
+
+    for(int i = first; i < total; i++) {
+        const sms_msg_t *m = sms_thread_msg(ui_active_number, i);
+        ui_reaction_t    r;
+
+        if(m == NULL || !ui_reaction_parse(m->text, &r)) continue;
+
+        for(int j = i - 1; j >= first; j--) {
+            const sms_msg_t *target = sms_thread_msg(ui_active_number, j);
+
+            if(target == NULL || attached[j - first]) continue;
+            if(!ui_reaction_matches(target->text, r.quoted)) continue;
+
+            // Taking a reaction back clears the badge rather than adding one.
+            if(r.removal) badges[j - first][0] = '\0';
+            else lv_snprintf(badges[j - first], sizeof(badges[0]), "%s", r.emoji);
+
+            attached[i - first] = true;
+            break;
+        }
+    }
+
     lv_coord_t y = 0;
     for(int i = first; i < total; i++) {
         int              log_idx = sms_thread_msg_index(ui_active_number, i);
         const sms_msg_t *m       = sms_get(log_idx);
-        if(m) y = scr13_1_bubble_create(scr13_1_cont, m, log_idx, y);
+
+        if(m == NULL) continue;
+        if(attached[i - first]) continue; // drawn on its target instead
+
+        y = scr13_1_bubble_create(scr13_1_cont, m, log_idx, y, badges[i - first]);
     }
 
     // Open on the newest message, the way a conversation is normally read.

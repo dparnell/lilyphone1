@@ -51,7 +51,9 @@ Message bodies additionally carry the sender's own line breaks, so anything rend
 
 In text mode with `CSCS="GSM"`, a message whose data coding scheme is UCS2 arrives as a **hex string** — anything the sender could not fit in the GSM 7-bit alphabet, including curly quotes and every emoji. `sms_fetch()` decodes it (`ucs2_hex_to_utf8`, surrogate pairs included) using the `<dcs>` that `AT+CSDH=1` adds to the `+CMGR` header, falling back to a shape heuristic that deliberately requires a hex letter so an all-digits one-time code is not mangled. Enabling CSDH is also why the timestamp is now found by its shape rather than as the last quoted field — CSDH appends the service centre number after it.
 
-Storage is therefore UTF-8 and `SMS_TEXT_LEN` (321) is sized for decoded multi-byte text, while `SMS_COMPOSE_MAX` (160) is what the composer allows for a single outgoing segment. Note the device fonts have no emoji glyphs, so a decoded emoji still draws a placeholder box; reaction messages sidestep that by being mapped to words (`ui_reaction_parse()`).
+Storage is therefore UTF-8 and `SMS_TEXT_LEN` (321) is sized for decoded multi-byte text, while `SMS_COMPOSE_MAX` (160) is what the composer allows for a single outgoing segment.
+
+**Reactions are ordinary messages.** SMS has no reaction protocol: the reacting phone sends a sentence quoting the message it refers to (`Liked "..."`, or an emoji then ` to "..."`). `ui_reaction_parse()` recognises those, and `scr13_1_populate()` does a pre-pass that pins each one to the nearest earlier message its quote matches, drawing it as a badge on that bubble instead of as a message of its own. The quote is matched as a *prefix* with any trailing ellipsis stripped, because a long message is only quoted as far as the sending phone chose to. A reaction whose target is not in the window falls back to being drawn as an annotation.
 
 ## Architecture
 
