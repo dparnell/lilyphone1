@@ -638,17 +638,68 @@ static void set_send_state(uint32_t send_id, modem_send_state_t st)
 /* AT+CMGS is the one command that does not follow the plain request/response
  * shape: the modem answers with a `>` prompt and then waits for the body
  * terminated by Ctrl-Z. */
-static bool sms_send(const char *number, const char *text)
+/* Folds the punctuation that forces UCS2 back into ASCII so a message can go
+ * out over GSM-7 after all. Anything else that cannot be represented becomes a
+ * question mark - a lossy last resort, but the alternative is not sending. */
+static void ascii_fold(const char *in, char *out, size_t out_len)
+{
+    static const struct {
+        const char *utf8;
+        const char *ascii;
+    } map[] = {
+        { "\xE2\x80\x9C", "\"" },  // left double quote
+        { "\xE2\x80\x9D", "\"" },  // right double quote
+        { "\xE2\x80\x98", "'" },   // left single quote
+        { "\xE2\x80\x99", "'" },   // right single quote
+        { "\xE2\x80\xA6", "..." }, // ellipsis
+        { "\xE2\x80\x93", "-" },   // en dash
+        { "\xE2\x80\x94", "-" },   // em dash
+    };
+
+    const unsigned char *p = (const unsigned char *)in;
+    size_t o = 0;
+
+    while(*p && o + 1 < out_len) {
+        if(*p < 0x80) {
+            out[o++] = (char)*p++;
+            continue;
+        }
+
+        bool mapped = false;
+        for(int i = 0; i < (int)(sizeof(map) / sizeof(map[0])); i++) {
+            size_t n = strlen(map[i].utf8);
+            if(strncmp((const char *)p, map[i].utf8, n) != 0) continue;
+
+            size_t a = strlen(map[i].ascii);
+            if(o + a + 1 >= out_len) break;
+            memcpy(out + o, map[i].ascii, a);
+            o += a;
+            p += n;
+            mapped = true;
+            break;
+        }
+        if(mapped) continue;
+
+        // Skip the whole sequence, not just its first byte.
+        int n = 1;
+        if((*p & 0xE0) == 0xC0)      n = 2;
+        else if((*p & 0xF0) == 0xE0) n = 3;
+        else if((*p & 0xF8) == 0xF0) n = 4;
+        p += n;
+
+        out[o++] = '?';
+    }
+
+    out[o] = '\0';
+}
+
+/* One attempt at AT+CMGS. `ucs2` selects the coding scheme and whether the body
+ * goes out as hex. */
+static bool sms_send_body(const char *number, const char *text, bool ucs2)
 {
     char cmd[CONTACT_NUMBER_LEN + 16];
     char line[MODEM_LINE_MAX];
     char hex[SMS_HEX_BODY_MAX];
-
-    /* Text the GSM alphabet cannot carry goes out as UCS2 instead: CSMP sets
-     * the data coding scheme to 8 and the body is then written as hex, the
-     * mirror of how one arrives. Reactions need this - the convention other
-     * phones use is built out of curly quotes. */
-    bool ucs2 = !text_is_gsm7(text);
 
     if(ucs2) {
         if(!utf8_to_ucs2_hex(text, hex, sizeof(hex))) {
@@ -656,9 +707,7 @@ static bool sms_send(const char *number, const char *text)
             return false;
         }
         if(!modem_exec("AT+CSMP=17,167,0,8", NULL, 0, 2000)) {
-            // Without the right coding scheme the bytes would arrive as
-            // nonsense, so give up rather than send something unreadable.
-            Serial.println("[MODEM] modem would not accept a UCS2 coding scheme");
+            Serial.println("[MODEM] modem would not take a UCS2 coding scheme");
             return false;
         }
     }
@@ -681,8 +730,6 @@ static bool sms_send(const char *number, const char *text)
         if(!prompt) vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    // Whatever happens from here, put the coding scheme back so the next
-    // message is not sent as UCS2 by accident.
     bool sent = false;
 
     if(!prompt) {
@@ -703,15 +750,41 @@ static bool sms_send(const char *number, const char *text)
                 sent = true;
                 break;
             }
-            if(strcmp(line, "ERROR") == 0) break;
-            if(strncmp(line, "+CMS ERROR", 10) == 0) break;
+            if(strcmp(line, "ERROR") == 0 || strncmp(line, "+CMS ERROR", 10) == 0) {
+                Serial.printf("[MODEM] send refused: %s\n", line);
+                break;
+            }
             handle_urc(line);
         }
     }
 
+    // Whatever happened, put the coding scheme back so the next message is not
+    // sent as UCS2 by accident.
     if(ucs2) modem_exec("AT+CSMP=17,167,0,0", NULL, 0, 2000);
 
     return sent;
+}
+
+static bool sms_send(const char *number, const char *text)
+{
+    Serial.printf("[MODEM] sending to %s: %s\n", number, text);
+
+    if(text_is_gsm7(text)) {
+        return sms_send_body(number, text, false);
+    }
+
+    if(sms_send_body(number, text, true)) return true;
+
+    /* Text mode UCS2 is where firmwares differ: some will not take the coding
+     * scheme, others want the body in a different form. Rather than drop the
+     * message, fold what cannot be represented down to ASCII and send it the
+     * ordinary way. A reaction that arrives reading Liked "..." with plain
+     * quotes is worth far more than one that never arrives at all. */
+    char folded[SMS_TEXT_LEN];
+    ascii_fold(text, folded, sizeof(folded));
+
+    Serial.printf("[MODEM] UCS2 send failed, retrying as GSM-7: %s\n", folded);
+    return sms_send_body(number, folded, false);
 }
 
 static void handle_request(const modem_req_t *req)

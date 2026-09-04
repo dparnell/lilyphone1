@@ -156,6 +156,40 @@ static void ui_confirm(const char *title, const char *body, const char *confirm_
 }
 
 /* A button in the top right of a screen, opposite the back button. */
+static void ui_notice_event(lv_event_t *e)
+{
+    lv_msgbox_close(lv_event_get_current_target(e));
+    ui_disp_full_refr();
+}
+
+/* Says something happened and gets out of the way. Used where an action can
+ * fail with nothing on screen to show it - a reaction has no status line of
+ * its own the way the composer does. */
+static const char *ui_notice_btns[2];
+
+static void ui_notice(const char *title, const char *body)
+{
+    ui_notice_btns[0] = "OK";
+    ui_notice_btns[1] = "";
+
+    lv_obj_t *mbox = lv_msgbox_create(NULL, title, body, ui_notice_btns, false);
+    lv_obj_set_width(mbox, lv_pct(88));
+    lv_obj_set_style_bg_color(mbox, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(mbox, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(mbox, 2, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(mbox, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_font(mbox, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_center(mbox);
+    lv_obj_set_style_bg_opa(lv_obj_get_parent(mbox), LV_OPA_TRANSP, LV_PART_MAIN);
+
+    lv_obj_t *btns = lv_msgbox_get_btns(mbox);
+    if(btns) lv_obj_set_size(btns, lv_pct(100), 40);
+
+    lv_obj_add_event_cb(mbox, ui_notice_event, LV_EVENT_VALUE_CHANGED, NULL);
+    ui_disp_full_refr();
+}
+
 static lv_obj_t *scr_action_btn_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb)
 {
     lv_obj_t *btn = lv_btn_create(parent);
@@ -3472,6 +3506,8 @@ static void scr13_1_send_reaction(const char *emoji)
         // The reaction lands in the log as an outgoing message, and the pass in
         // populate pins it to the message it names, same as a received one.
         scr13_1_populate();
+    } else {
+        ui_notice("Not sent", "The modem is busy with another message. Try again in a moment.");
     }
 }
 
@@ -3686,6 +3722,11 @@ static void scr13_1_populate(void)
         ui_reaction_t    r;
 
         if(m == NULL || !ui_reaction_parse(m->text, &r)) continue;
+
+        /* One of ours that the network turned down is left as a message, where
+         * the bubble shows it as not sent. Pinned as a badge it would look
+         * exactly like one that got through. */
+        if(m->dir == SMS_DIR_OUT && m->status == SMS_ST_FAILED) continue;
 
         for(int j = i - 1; j >= first; j--) {
             const sms_msg_t *target = sms_thread_msg(ui_active_number, j);
