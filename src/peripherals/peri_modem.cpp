@@ -826,6 +826,66 @@ static bool sms_send(const char *number, const char *text)
     return sms_send_body(number, folded, false);
 }
 
+/* Ways of making a noise, tried until one is accepted.
+ *
+ * Which of these a given A76xx firmware implements is not something the code
+ * can find out ahead of time, and an unsupported command simply answers ERROR.
+ * So try them, say in the log which one worked, and stop asking once it is
+ * clear that none of them will. */
+typedef struct {
+    const char *name;
+    const char *start;
+    const char *stop;    // NULL when the start command stops on its own
+    uint32_t    hold_ms;
+} tone_method_t;
+
+static const tone_method_t tone_methods[] = {
+    // Frequency and durations in one go, and it stops itself.
+    { "SIMTONE", "AT+SIMTONE=1,1000,300,100,700", NULL,          0   },
+    // A named tone that plays until it is told to stop.
+    { "CPTONE",  "AT+CPTONE=1",                   "AT+CPTONE=0", 600 },
+    // Some firmwares spell the same idea this way.
+    { "CTONE",   "AT+CTONE=1",                    "AT+CTONE=0",  600 },
+};
+
+static int  tone_first     = 0;    // the one that worked last time
+static bool tone_supported = true; // until every one of them has been refused
+
+static void tone_play(void)
+{
+    if(!tone_supported) return;
+
+    /* Send the output somewhere audible first: 3 is the loudspeaker. Firmwares
+     * without this command answer ERROR and are none the worse for it. */
+    modem_exec("AT+CSDVC=3", NULL, 0, 2000);
+
+    int count = (int)(sizeof(tone_methods) / sizeof(tone_methods[0]));
+
+    for(int n = 0; n < count; n++) {
+        int                  i = (tone_first + n) % count;
+        const tone_method_t *m = &tone_methods[i];
+
+        if(!modem_exec(m->start, NULL, 0, 2000)) {
+            Serial.printf("[MODEM] %s refused\n", m->name);
+            continue;
+        }
+
+        if(m->stop) {
+            vTaskDelay(pdMS_TO_TICKS(m->hold_ms));
+            modem_exec(m->stop, NULL, 0, 2000);
+        }
+
+        if(tone_first != i) {
+            Serial.printf("[MODEM] notification tone plays with %s\n", m->name);
+            tone_first = i;
+        }
+        return;
+    }
+
+    Serial.println("[MODEM] no tone command this modem accepts; text sound will stay silent");
+    tone_supported = false;
+}
+
 static void handle_request(const modem_req_t *req)
 {
     char cmd[CONTACT_NUMBER_LEN + 16];
@@ -859,11 +919,7 @@ static void handle_request(const modem_req_t *req)
             break;
 
         case REQ_TONE:
-            // Start, hold briefly, stop. A module without CPTONE answers ERROR
-            // to both, which costs a couple of milliseconds and does nothing.
-            modem_exec("AT+CPTONE=1", NULL, 0, 2000);
-            vTaskDelay(pdMS_TO_TICKS(500));
-            modem_exec("AT+CPTONE=0", NULL, 0, 2000);
+            tone_play();
             break;
 
         case REQ_RAW_AT: {

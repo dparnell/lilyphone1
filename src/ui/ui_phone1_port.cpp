@@ -499,11 +499,17 @@ void ui_notify_incoming_text(void)
 {
     if(notify_vibrate_text) ui_phone_vibrate(250);
 
+    if(!notify_sound_text) return;
+
     // Not over the top of a call: the tone comes out of the same speaker path
     // the call is using.
-    if(notify_sound_text && modem_get_call_state() == MODEM_CALL_IDLE) {
-        modem_play_tone();
+    if(modem_get_call_state() != MODEM_CALL_IDLE) {
+        Serial.println("[NOTIFY] no text tone during a call");
+        return;
     }
+
+    Serial.println("[NOTIFY] playing the text tone");
+    modem_play_tone();
 }
 
 //************************************[ screen 13 ]***************************************** messaging
