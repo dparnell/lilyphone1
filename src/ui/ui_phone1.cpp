@@ -1913,6 +1913,58 @@ static void ui_set_active_number(const char *number)
     ui_active_contact = contacts_find_by_number(ui_active_number);
 }
 
+/* Message bodies arrive with the sender's line breaks in them, and a list row
+ * has exactly one line to spare. Collapse every run of whitespace to a single
+ * space and drop control characters, so a row cannot grow past its height.
+ * Bytes above 0x7F are passed through untouched to keep UTF-8 intact. */
+static void ui_message_snippet(char *buf, int len, const char *text)
+{
+    int  o     = 0;
+    bool space = false;
+
+    if(text == NULL) text = "";
+    while(*text && isspace((unsigned char)*text)) text++; // leading whitespace
+
+    for(const char *p = text; *p && o < len - 1; p++) {
+        unsigned char c = (unsigned char)*p;
+
+        if(c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+            space = true;
+            continue;
+        }
+        if(c < 0x20 || c == 0x7F) continue; // other control characters
+
+        if(space && o > 0 && o < len - 1) buf[o++] = ' ';
+        space = false;
+        if(o < len - 1) buf[o++] = (char)c;
+    }
+    buf[o] = '\0';
+}
+
+/* "14:05" for today, "04/09" for anything older. The list rows have only a
+ * narrow column beside the name, so they use this rather than the full stamp. */
+static void ui_format_stamp_compact(char *buf, int len, uint32_t ts)
+{
+    if(ts == 0) {
+        lv_snprintf(buf, len, "--:--");
+        return;
+    }
+
+    time_t    when = (time_t)ts;
+    time_t    now  = time(NULL);
+    struct tm when_tm;
+    struct tm now_tm;
+
+    localtime_r(&when, &when_tm);
+    localtime_r(&now, &now_tm);
+
+    if(when_tm.tm_year == now_tm.tm_year && when_tm.tm_yday == now_tm.tm_yday) {
+        strftime(buf, len, "%H:%M", &when_tm);
+    } else {
+        strftime(buf, len, "%d/%m", &when_tm);
+    }
+}
+
 /* "14:05" for today, "04/09 14:05" for anything older. Shows "--:--" until the
  * GPS has given us a clock. */
 static void ui_format_stamp(char *buf, int len, uint32_t ts)
@@ -1988,10 +2040,14 @@ static lv_obj_t *scr_row_create(lv_obj_t *list, const char *title, const char *s
     lv_obj_set_style_pad_all(row, 4, LV_PART_MAIN);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
+    // Both labels get an explicit height, not just a width. LV_LABEL_LONG_DOT
+    // wraps the text and only writes the ellipsis once it overflows the
+    // label's *height*, so a label left at LV_SIZE_CONTENT grows to fit the
+    // whole string and spills out over the rest of the list.
     lv_obj_t *first = lv_label_create(row);
     lv_obj_set_style_text_font(first, FONT_BOLD_SIZE_15, LV_PART_MAIN);
     lv_label_set_long_mode(first, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(first, badge ? 148 : 208);
+    lv_obj_set_size(first, badge ? 146 : 208, 18);
     lv_label_set_text(first, title);
     lv_obj_align(first, subtitle ? LV_ALIGN_TOP_LEFT : LV_ALIGN_LEFT_MID, 2, subtitle ? 1 : 0);
 
@@ -1999,7 +2055,7 @@ static lv_obj_t *scr_row_create(lv_obj_t *list, const char *title, const char *s
         lv_obj_t *second = lv_label_create(row);
         lv_obj_set_style_text_font(second, FONT_BOLD_SIZE_14, LV_PART_MAIN);
         lv_label_set_long_mode(second, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(second, 208);
+        lv_obj_set_size(second, 208, 16);
         lv_label_set_text(second, subtitle);
         lv_obj_align(second, LV_ALIGN_BOTTOM_LEFT, 2, -1);
     }
@@ -2703,6 +2759,7 @@ static void scr13_populate(void)
         const char      *number = sms_thread_number(i);
         const sms_msg_t *last   = sms_thread_last(i);
         char title[CONTACT_NAME_LEN + 8];
+        char snippet[48];
         char badge[16];
 
         // An unread marker in the title is easier to spot on e-ink than a
@@ -2711,9 +2768,18 @@ static void scr13_populate(void)
                     sms_thread_unread(number) > 0 ? LV_SYMBOL_ENVELOPE " " : "",
                     contacts_display_name(number));
 
-        ui_format_stamp(badge, sizeof(badge), last ? last->ts : 0);
+        // A row previews the conversation; the whole message is one tap away.
+        ui_message_snippet(snippet, sizeof(snippet), last ? last->text : "");
+        if(last && last->dir == SMS_DIR_OUT) {
+            // Without this a thread you last replied to reads as if they said it.
+            char sent[sizeof(snippet)];
+            lv_snprintf(sent, sizeof(sent), "You: %s", snippet);
+            lv_snprintf(snippet, sizeof(snippet), "%s", sent);
+        }
 
-        scr_row_create(scr13_list, title, last ? last->text : "", badge,
+        ui_format_stamp_compact(badge, sizeof(badge), last ? last->ts : 0);
+
+        scr_row_create(scr13_list, title, snippet, badge,
                        scr13_row_event, (void *)(intptr_t)i);
     }
 
