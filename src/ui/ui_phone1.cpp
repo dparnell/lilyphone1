@@ -3077,10 +3077,15 @@ static void scr13_populate(void)
         // A row previews the conversation; the whole message is one tap away.
         ui_message_snippet(snippet, sizeof(snippet), last ? last->text : "");
         if(last && last->dir == SMS_DIR_OUT) {
-            // Without this a thread you last replied to reads as if they said it.
-            char sent[sizeof(snippet)];
-            lv_snprintf(sent, sizeof(sent), "You: %s", snippet);
-            lv_snprintf(snippet, sizeof(snippet), "%s", sent);
+            // Without a prefix a thread you last replied to reads as if they
+            // said it. The delivery state goes here too: sending returns to
+            // this screen, so this is where a failure has to be visible.
+            const char *prefix = (last->status == SMS_ST_FAILED)  ? LV_SYMBOL_WARNING " not sent: "
+                               : (last->status == SMS_ST_PENDING) ? "Sending: "
+                                                                  : "You: ";
+            char line[sizeof(snippet)];
+            lv_snprintf(line, sizeof(line), "%s%s", prefix, snippet);
+            lv_snprintf(snippet, sizeof(snippet), "%s", line);
         }
 
         ui_format_stamp_compact(badge, sizeof(badge), last ? last->ts : 0);
@@ -3376,7 +3381,6 @@ static scr_lifecycle_t screen13_1 = {
 static lv_obj_t   *scr13_2_to_label = NULL;
 static lv_obj_t   *scr13_2_body_ta  = NULL;
 static lv_obj_t   *scr13_2_status   = NULL;
-static lv_timer_t *scr13_2_timer    = NULL;
 
 static void scr13_2_back_event(lv_event_t *e)
 {
@@ -3404,35 +3408,17 @@ static void scr13_2_pick_event(lv_event_t *e)
     scr_mgr_push(SCREEN12_ID, false);
 }
 
-/* Reports how the send that this screen started ended up. The log itself is
- * corrected centrally, so this only has to keep the label honest while the
- * screen is open. */
-static void scr13_2_status_timer(lv_timer_t *t)
-{
-    LV_UNUSED(t);
-
-    if(ui_send_watch_id != 0) return; // still with the modem
-
-    const sms_msg_t *m = sms_get(ui_send_watch_idx);
-    lv_label_set_text(scr13_2_status,
-                      (m && m->status == SMS_ST_FAILED) ? "Could not send" : "Sent");
-
-    lv_timer_del(scr13_2_timer);
-    scr13_2_timer = NULL;
-    ui_disp_full_refr();
-}
-
 static void scr13_2_send_event(lv_event_t *e)
 {
     LV_UNUSED(e);
 
     const char *body = lv_textarea_get_text(scr13_2_body_ta);
 
-    if(ui_active_number[0] == '\0') {
+    if(ui_active_number[0] == ' ') {
         lv_label_set_text(scr13_2_status, "Choose who to send to first");
         return;
     }
-    if(body == NULL || body[0] == '\0') {
+    if(body == NULL || body[0] == ' ') {
         lv_label_set_text(scr13_2_status, "Nothing to send");
         return;
     }
@@ -3454,12 +3440,14 @@ static void scr13_2_send_event(lv_event_t *e)
     ui_send_watch_id  = send_id;
     ui_sms_revision++;
 
+    // Clear before leaving, or exit13_2 keeps the sent text as a draft.
     lv_textarea_set_text(scr13_2_body_ta, "");
-    lv_label_set_text(scr13_2_status, "Sending...");
 
-    if(scr13_2_timer == NULL) {
-        scr13_2_timer = lv_timer_create(scr13_2_status_timer, 500, NULL);
-    }
+    /* Straight back to whatever opened the composer, rather than waiting on the
+     * network: the message is already in the log as pending, and the screen
+     * behind shows it that way. The outcome is watched centrally, so it lands
+     * wherever the user happens to be by then. */
+    scr_mgr_pop(false);
 }
 
 static void create13_2(lv_obj_t *parent)
@@ -3519,10 +3507,6 @@ static void exit13_2(void)
 
 static void destroy13_2(void)
 {
-    if(scr13_2_timer) {
-        lv_timer_del(scr13_2_timer);
-        scr13_2_timer = NULL;
-    }
     scr13_2_to_label = NULL;
     scr13_2_body_ta  = NULL;
     scr13_2_status   = NULL;
