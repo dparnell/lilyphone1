@@ -410,8 +410,18 @@ static void menu_btn_event_cb(lv_event_t *e)
     scr_mgr_push(tgr->idx, false);
 }
 
-static void menu_get_gesture_dir(int dir)
+static void menu_get_gesture_dir(int dir, lv_coord_t from_x, lv_coord_t from_y)
 {
+    LV_UNUSED(from_x);
+
+    /* Pulled down from the top edge: the quick settings. Started further down
+     * the screen it is just a stray drag across the icons, so it is ignored. */
+    if(dir == LV_DIR_BOTTOM) {
+        if(from_y <= UI_SHADE_PULL_ZONE) scr_mgr_push(SCREEN14_ID, false);
+        return;
+    }
+    if(dir == LV_DIR_TOP) return;
+
     if(MENU_BTN_NUM <= 9) return;
 
     if(dir == LV_DIR_LEFT) {
@@ -4118,6 +4128,261 @@ static scr_lifecycle_t screen11 = {
     .destroy = destroy11,
 };
 #endif
+//************************************[ screen 14 ]***************************************** quick settings
+#if 1
+/* Pulled down from the top of the menu. The settings here are the ones worth
+ * changing without walking into the settings screen - what the phone does when
+ * it wants attention, and the way out to a locked screen. */
+static lv_obj_t *scr14_list = NULL;
+
+static const struct {
+    const char *name;
+    const char *icon;
+    void (*set)(bool);
+    bool (*get)(void);
+} scr14_toggles[] = {
+    { "Keypad Backlight", LV_SYMBOL_KEYBOARD,   ui_setting_set_keypad_light, ui_setting_get_keypad_light },
+    { "Vibrate on Call",  LV_SYMBOL_CALL,       ui_setting_set_vibrate_call, ui_setting_get_vibrate_call },
+    { "Vibrate on Text",  LV_SYMBOL_ENVELOPE,   ui_setting_set_vibrate_text, ui_setting_get_vibrate_text },
+    { "Sound on Text",    LV_SYMBOL_VOLUME_MAX, ui_setting_set_sound_text,   ui_setting_get_sound_text   },
+};
+
+static void scr14_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) {
+        scr_mgr_pop(false);
+    }
+}
+
+static void scr14_toggle_event(lv_event_t *e)
+{
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if(idx < 0 || idx >= (int)GET_BUFF_LEN(scr14_toggles)) return;
+
+    scr14_toggles[idx].set(!scr14_toggles[idx].get());
+
+    // The state label is the row's last child, added right after the row.
+    lv_obj_t *row = (lv_obj_t *)lv_event_get_target(e);
+    lv_obj_t *state = lv_obj_get_child(row, lv_obj_get_child_cnt(row) - 1);
+    if(state) lv_label_set_text(state, scr14_toggles[idx].get() ? "ON" : "OFF");
+
+    ui_disp_full_refr();
+}
+
+static void scr14_lock_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    /* Switch rather than push: it clears the screen stack, so nothing is left
+     * behind the lock screen holding widgets that a stray keypress could still
+     * reach through the input group. */
+    scr_mgr_switch(SCREEN15_ID, false);
+}
+
+static void create14(lv_obj_t *parent)
+{
+    lv_obj_t *bar = scr_action_bar_create(parent, 44);
+    scr_bar_btn_create(bar, LV_SYMBOL_POWER "  Lock screen", 190, scr14_lock_event, NULL);
+
+    scr14_list = lv_list_create(parent);
+    scr_scroll_for_epaper(scr14_list);
+    lv_obj_set_size(scr14_list, lv_pct(96), LV_VER_RES - 36 - 52);
+    lv_obj_align(scr14_list, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_set_style_pad_all(scr14_list, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(scr14_list, 6, LV_PART_MAIN);
+    lv_obj_set_style_radius(scr14_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scr14_list, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr14_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(scr14_list, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(scr14_list, LV_SCROLLBAR_MODE_OFF);
+
+    for(int i = 0; i < (int)GET_BUFF_LEN(scr14_toggles); i++) {
+        lv_obj_t *row = lv_list_add_btn(scr14_list, scr14_toggles[i].icon, scr14_toggles[i].name);
+
+        lv_obj_set_height(row, 34);
+        lv_obj_set_style_text_font(row, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
+        lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+        lv_obj_set_style_outline_width(row, 1, LV_PART_MAIN | LV_STATE_PRESSED);
+        lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
+
+        lv_obj_t *state = lv_label_create(row);
+        lv_obj_set_style_text_font(state, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+        lv_label_set_text(state, scr14_toggles[i].get() ? "ON" : "OFF");
+
+        lv_obj_add_event_cb(row, scr14_toggle_event, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    }
+
+    scr_back_btn_create(parent, "Quick settings", scr14_back_event);
+}
+
+static void entry14(void)
+{
+    ui_disp_full_refr();
+}
+
+static void exit14(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy14(void)
+{
+    scr14_list = NULL;
+}
+
+static scr_lifecycle_t screen14 = {
+    .create = create14,
+    .entry = entry14,
+    .exit  = exit14,
+    .destroy = destroy14,
+};
+#endif
+//************************************[ screen 15 ]***************************************** lock
+#if 1
+/* A locked screen is a good fit for e-paper: the clock stays on the glass for
+ * nothing once it has been drawn, and there is nothing here to press by
+ * accident. Swiping up is the way out - deliberate enough not to happen in a
+ * pocket, which is the point of locking in the first place. */
+static lv_obj_t   *scr15_clock  = NULL;
+static lv_obj_t   *scr15_detail = NULL;
+static lv_timer_t *scr15_timer  = NULL;
+
+static void scr15_render(void)
+{
+    if(scr15_clock == NULL) return;
+
+    char when[48] = "--:--";
+    char detail[96];
+
+    if(system_clock_is_set()) {
+        time_t    now = time(NULL);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+        strftime(when, sizeof(when), "%H:%M", &tm_now);
+    }
+    lv_label_set_text(scr15_clock, when);
+
+    char date[40] = "";
+    if(system_clock_is_set()) {
+        time_t    now = time(NULL);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+        strftime(date, sizeof(date), "%a %d %b", &tm_now);
+    }
+
+    int unread = sms_unread_total();
+    if(unread > 0) {
+        lv_snprintf(detail, sizeof(detail), "%s\n\n%s %d unread\n\n%s %d%%",
+                    date, LV_SYMBOL_ENVELOPE, unread,
+                    ui_battert_27220_get_percent_level(), ui_battery_27220_get_percent());
+    } else {
+        lv_snprintf(detail, sizeof(detail), "%s\n\n%s %d%%",
+                    date, ui_battert_27220_get_percent_level(),
+                    ui_battery_27220_get_percent());
+    }
+    lv_label_set_text(scr15_detail, detail);
+}
+
+/* Only repaints when the minute changes: a clock that redrew every tick would
+ * keep the panel busy for no benefit. */
+static void scr15_timer_event(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    static int shown_minute = -1;
+    static int shown_unread = -1;
+
+    time_t    now = time(NULL);
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+
+    int unread = sms_unread_total();
+    if(tm_now.tm_min == shown_minute && unread == shown_unread) return;
+
+    shown_minute = tm_now.tm_min;
+    shown_unread = unread;
+
+    scr15_render();
+    ui_disp_full_refr();
+}
+
+static void scr15_gesture(int dir, lv_coord_t from_x, lv_coord_t from_y)
+{
+    LV_UNUSED(from_x);
+    LV_UNUSED(from_y);
+
+    if(dir == LV_DIR_TOP) scr_mgr_switch(SCREEN0_ID, false);
+}
+
+static void create15(lv_obj_t *parent)
+{
+    scr15_clock = lv_label_create(parent);
+    lv_obj_set_width(scr15_clock, lv_pct(92));
+    lv_obj_set_style_text_font(scr15_clock, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr15_clock, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(scr15_clock, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(scr15_clock, LV_ALIGN_TOP_MID, 0, 70);
+
+    scr15_detail = lv_label_create(parent);
+    lv_obj_set_width(scr15_detail, lv_pct(92));
+    lv_obj_set_style_text_font(scr15_detail, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr15_detail, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(scr15_detail, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(scr15_detail, LV_LABEL_LONG_WRAP);
+    lv_obj_align(scr15_detail, LV_ALIGN_TOP_MID, 0, 120);
+
+    lv_obj_t *hint = lv_label_create(parent);
+    lv_obj_set_width(hint, lv_pct(92));
+    lv_obj_set_style_text_font(hint, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(hint, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_text(hint, LV_SYMBOL_UP "\nSwipe up to unlock");
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
+
+    scr15_render();
+}
+
+static void entry15(void)
+{
+    ui_get_gesture_dir = scr15_gesture;
+    lv_timer_resume(touch_chk_timer);
+
+    if(scr15_timer == NULL) {
+        scr15_timer = lv_timer_create(scr15_timer_event, 5000, NULL);
+    }
+
+    scr15_render();
+    ui_disp_full_refr();
+}
+
+static void exit15(void)
+{
+    ui_get_gesture_dir = NULL;
+    lv_timer_pause(touch_chk_timer);
+
+    if(scr15_timer) {
+        lv_timer_del(scr15_timer);
+        scr15_timer = NULL;
+    }
+    ui_disp_full_refr();
+}
+
+static void destroy15(void)
+{
+    scr15_clock  = NULL;
+    scr15_detail = NULL;
+}
+
+static scr_lifecycle_t screen15 = {
+    .create = create15,
+    .entry = entry15,
+    .exit  = exit15,
+    .destroy = destroy15,
+};
+#endif
 //************************************[ UI ENTRY ]******************************************
 static lv_obj_t *menu_keypad;
 static lv_timer_t *menu_timer = NULL;
@@ -4165,20 +4430,31 @@ static void indev_get_gesture_dir(lv_timer_t *t)
         press_start = data.point;
     }
 
-    if(fired || ui_get_gesture_dir == NULL) return;
+    // Captured before dispatching: the handler may switch screens, and the one
+    // that arrives will have replaced this.
+    ui_indev_read_cb cb = ui_get_gesture_dir;
+    if(fired || cb == NULL) return;
 
     // Measured from where the finger landed, and fired at most once per swipe.
     // The previous version reset the anchor to x=0 after firing, which made the
     // very next sample look like a full swipe in the opposite direction.
     lv_coord_t dx = data.point.x - press_start.x;
+    lv_coord_t dy = data.point.y - press_start.y;
+    int        dir = 0;
 
-    if(dx <= -UI_SLIDING_DISTANCE) {
-        ui_get_gesture_dir(LV_DIR_LEFT);
-        fired = true;
-    } else if(dx >= UI_SLIDING_DISTANCE) {
-        ui_get_gesture_dir(LV_DIR_RIGHT);
-        fired = true;
+    // Whichever axis the finger travelled furthest along is the one it meant.
+    if(LV_ABS(dx) >= LV_ABS(dy)) {
+        if(dx <= -UI_SLIDING_DISTANCE)     dir = LV_DIR_LEFT;
+        else if(dx >= UI_SLIDING_DISTANCE) dir = LV_DIR_RIGHT;
+    } else {
+        if(dy >= UI_SLIDING_DISTANCE)      dir = LV_DIR_BOTTOM;
+        else if(dy <= -UI_SLIDING_DISTANCE) dir = LV_DIR_TOP;
     }
+
+    if(dir == 0) return;
+
+    fired = true;
+    cb(dir, press_start.x, press_start.y);
 }
 
 static void menu_keypay_get_event(lv_timer_t *t)
@@ -4436,6 +4712,8 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN13_ID,   &screen13);     // Messages
     scr_mgr_register(SCREEN13_1_ID, &screen13_1);   //  - conversation
     scr_mgr_register(SCREEN13_2_ID, &screen13_2);   //  - compose
+    scr_mgr_register(SCREEN14_ID,   &screen14);     // Quick settings
+    scr_mgr_register(SCREEN15_ID,   &screen15);     // Lock screen
     
 
     scr_mgr_switch(SCREEN0_ID, false); // set root screen

@@ -136,19 +136,25 @@ bool scr_mgr_switch(int id, bool anim)  // Clear the stack and switch to the scr
     if(tgt_card == NULL) // The screen was not found
         return false;
 
-    if(scr_stack_top != NULL) { // If there are multiple screen cards stacked together, record the top card first
-        curr_obj = scr_stack_top->obj;
+    /* Only the screen actually on the display is held back to be deleted after
+     * its replacement has loaded; everything under it on the stack is deleted
+     * as the stack unwinds.
+     *
+     * This used to keep one `curr_obj` and overwrite it each time round, so a
+     * switch from anywhere deeper than the root leaked every widget tree in
+     * between - which went unnoticed while the only switch happened at startup
+     * with an empty stack. */
+    if(scr_stack_top != NULL) curr_obj = scr_stack_top->obj;
+
+    while(scr_stack_top != NULL) { // Clear the stack
+        lv_obj_t *obj = scr_stack_top->obj;
+
         stack_scr = scr_stack_top->prev;
         scr_mgr_remove(scr_stack_top);
         lv_mem_free((void *)scr_stack_top);
         scr_stack_top = stack_scr;
-    }
-    while(scr_stack_top != NULL) { // Then clear all cards
-        stack_scr = scr_stack_top->prev;
-        curr_obj = scr_stack_top->obj;
-        scr_mgr_remove(scr_stack_top);
-        lv_mem_free((void *)scr_stack_top);
-        scr_stack_top = stack_scr;
+
+        if(obj && obj != curr_obj) lv_obj_del(obj);
     }
 
     stack_scr = lv_mem_alloc(sizeof(scr_card_t));

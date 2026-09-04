@@ -86,6 +86,8 @@ Two rules follow from how it works, and violating either corrupts the stack or f
 - **Never call `scr_mgr_pop`/`push` from inside a screen's own `entry()` or `exit()`** — the manager is mid-walk of its stack. A screen whose contents went stale must rebuild in place (`lv_obj_clean` + repopulate). The list screens do this with revision counters: `ui_sms_revision` / `ui_contacts_revision` are bumped by whoever mutates the data, and each list compares them in `entry()`. `entry()` alone is not enough for data that arrives on its own — it does not run again while a screen stays on top — so `phone_event_timer_cb` also refreshes whichever message screen is currently showing (`ui_sms_refresh_visible()`).
 - Popping from a button's own event callback is fine and is the established pattern, but chaining several pops/pushes in one callback is not.
 
+`scr_mgr_switch()` clears the stack, which is what the lock screen uses: nothing is left behind it holding widgets a stray keypress could reach through the input group. `scr_mgr_push()` keeps the screen underneath alive.
+
 A pushed screen's widgets are destroyed on pop, so a screen cannot return a value directly. The hand-off is a set of file-scope variables in `src/ui/ui_phone1.cpp` (`ui_active_number`, `ui_active_contact`, `ui_pick_mode`, `ui_pick_ready`, `ui_compose_prefill`): the pusher sets the subject, the pushed screen reads it.
 
 ### UI layering
@@ -124,7 +126,7 @@ Two LVGL input devices are registered in `lvgl_init()`: the CST touch panel as a
 
 `src/peripherals/peri_keypad.cpp` holds four keymaps (base / shift / sym / alt) selected by modifier state; digits live on the **sym** layer, which is why the dialer and contact editor provide on-screen numeric button matrices.
 
-Horizontal swipes are detected separately by `indev_get_gesture_dir` polling the pointer indev; only the home screen uses it, to page between menu screens. The menu holds 9 buttons per page with hard-coded `pos_x`/`pos_y` per entry, and a second page appears once `menu_btn_list` exceeds 9 items.
+Swipes are detected separately by `indev_get_gesture_dir` polling the pointer indev, and reported with the point the finger started from - which is what distinguishes a pull from the top edge (the quick settings shade, `UI_SHADE_PULL_ZONE`) from a drag further down. The home screen uses it to page between menu screens and to open the shade; the lock screen uses it to unlock. The menu holds 9 buttons per page with hard-coded `pos_x`/`pos_y` per entry, and a second page appears once `menu_btn_list` exceeds 9 items.
 
 **`lv_indev_get_next(NULL)` returns the device registered *last*, not the touch panel.** `lv_indev_drv_register` inserts at the head of the list, and `lvgl_init()` registers the touchpad before the keypad, so the head is the keypad. Anything wanting the touch panel must walk the list for `LV_INDEV_TYPE_POINTER` (`indev_get_pointer()`). Reading the keypad indev by hand is doubly wrong: it yields no coordinates, and `keypad_read` pops the TCA8418 FIFO, stealing keys from LVGL's own handling.
 

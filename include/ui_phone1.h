@@ -17,6 +17,9 @@ extern "C" {
 #define DECKPRO_COLOR_BG        lv_color_white()
 #define DECKPRO_COLOR_FG        lv_color_black()
 #define UI_SLIDING_DISTANCE     40
+// How far down the screen a swipe may start and still count as pulling the
+// quick settings out of the top edge.
+#define UI_SHADE_PULL_ZONE      60
 #define UI_WIFI_SCAN_ITEM_MAX   13
 
 /*********************************************************************************
@@ -49,6 +52,8 @@ enum {
     SCREEN13_ID,   // messages, one row per conversation
     SCREEN13_1_ID, // conversation
     SCREEN13_2_ID, // compose
+    SCREEN14_ID,   // quick settings, pulled down from the top of the menu
+    SCREEN15_ID,   // lock screen
 };
 
 /* Why the contacts list was opened. When it is a pick the list hands a number
@@ -59,7 +64,9 @@ enum {
     UI_PICK_COMPOSE,
 };
 
-typedef void (*ui_indev_read_cb)(int);
+/* A swipe: the direction, and where on the screen the finger started - which is
+ * what tells a pull from the top edge apart from a scroll further down. */
+typedef void (*ui_indev_read_cb)(int dir, lv_coord_t from_x, lv_coord_t from_y);
 
 enum {
     TASKBAR_ID_CHARGE,
