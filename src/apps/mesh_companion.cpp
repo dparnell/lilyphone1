@@ -624,7 +624,18 @@ static void handle_frame(int len)
         char name[MESH_NET_NAME_LEN];
         mesh_net_get_self_name(name, sizeof(name));
 
-        int32_t  lat = 0, lon = 0;   // this node does not put its location in adverts
+        /* The position, in millionths of a degree, and whether this node shares
+         * it. Zero for both when the GPS has no fix or sharing is off, which is
+         * what the app should show - it is what other nodes would see. */
+        int32_t lat = 0, lon = 0;
+        double  dlat, dlon;
+
+        bool sharing = mesh_net_get_loc_policy() != MESH_LOC_OFF;
+        if(sharing && mesh_net_get_position(&dlat, &dlon)) {
+            lat = (int32_t)(dlat * 1000000.0);
+            lon = (int32_t)(dlon * 1000000.0);
+        }
+
         uint32_t freq_khz = (uint32_t)(radio.freq_mhz * 1000.0f);
         uint32_t bw_hz    = (uint32_t)(radio.bandwidth_khz * 1000.0f);
 
@@ -637,7 +648,7 @@ static void handle_frame(int len)
         memcpy(&out_frame[i], &lat, 4);  i += 4;
         memcpy(&out_frame[i], &lon, 4);  i += 4;
         out_frame[i++] = 0;   // multi_acks
-        out_frame[i++] = 0;   // advert location policy: never
+        out_frame[i++] = sharing ? 1 : 0;   // advert location policy
         out_frame[i++] = 0;   // telemetry modes
         out_frame[i++] = 0;   // contacts are added from adverts, not by hand
         memcpy(&out_frame[i], &freq_khz, 4);  i += 4;
@@ -853,7 +864,10 @@ static void handle_frame(int len)
         write_ok();
 
     } else if(cmd == CMD_SET_ADVERT_LATLON) {
-        // Adverts from this node carry no location, so there is nothing to set.
+        /* Accepted and ignored. This node's position comes from its own GPS, so
+         * there is nothing for the app to set - and refusing stops some apps
+         * part way through connecting. What it asked for is not what gets
+         * shared, but SELF_INFO tells it the truth either way. */
         write_ok();
 
     } else if(cmd == CMD_SET_RADIO_PARAMS && len >= 11) {
@@ -1189,6 +1203,15 @@ void mesh_companion_boot(void)
 int mesh_companion_get_link(void)
 {
     return link_wanted;
+}
+
+const char *mesh_companion_link_name(void)
+{
+    switch(link_wanted) {
+        case MESH_LINK_BLE:  return "Bluetooth";
+        case MESH_LINK_WIFI: return "WiFi";
+        default:             return "Off";
+    }
 }
 
 void mesh_companion_set_link(int want)

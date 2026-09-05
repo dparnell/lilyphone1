@@ -863,6 +863,13 @@ static scr_lifecycle_t screen1 = {
  * generated once and kept, because losing it means every node that knows this
  * one no longer does. */
 static lv_obj_t *scr1_1_name = NULL;
+static lv_obj_t *scr1_1_list = NULL;
+
+static void scr1_1_populate(void);
+
+/* A row that only reports something; rows are buttons and need a callback
+ * whether or not there is anything to do with a press. */
+static void scr1_1_inert_event(lv_event_t *e) { LV_UNUSED(e); }
 
 static void scr1_1_btn_event_cb(lv_event_t * e)
 {
@@ -884,7 +891,27 @@ static void scr1_1_save_event(lv_event_t *e)
 static void scr1_1_advertise_event(lv_event_t *e)
 {
     LV_UNUSED(e);
+
     mesh_net_advertise();
+
+    double lat, lon;
+    if(mesh_net_get_loc_policy() != MESH_LOC_OFF && !mesh_net_get_position(&lat, &lon)) {
+        // Sharing is on but there is nothing to share, which is worth saying:
+        // the advert went out, just without a position in it.
+        ui_notice("Announced", "Sent without a position - the GPS has no fix yet.");
+    }
+}
+
+/* Off / only when the user asks / every advert. Off by default and deliberately
+ * three-way: an advert floods the mesh and is relayed well past radio range, so
+ * "share because I meant to" is a different thing from "share always". */
+static void scr1_1_location_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    mesh_net_set_loc_policy((mesh_net_get_loc_policy() + 1) % 3);
+    scr1_1_populate();
+    ui_disp_full_refr();
 }
 
 static void scr1_1_radio_event(lv_event_t *e)
@@ -899,36 +926,59 @@ static void scr1_1_companion_event(lv_event_t *e)
     scr_mgr_push(SCREEN1_6_ID, false);
 }
 
+/* Everything about this node except its name, which needs a keyboard and so
+ * gets the field above. A list rather than a wall of buttons: there are now
+ * more of these than an action bar can hold, and half of them carry a value
+ * worth showing next to the label. */
+static void scr1_1_populate(void)
+{
+    char key[16];
+    char value[56];
+
+    lv_obj_clean(scr1_1_list);
+
+    mesh_net_get_self_key(key, sizeof(key));
+    scr_row_create(scr1_1_list, "Key", key, NULL, scr1_1_inert_event, NULL);
+
+    mesh_radio_t r;
+    mesh_net_get_radio(&r);
+    lv_snprintf(value, sizeof(value), "%s  %.3f", mesh_net_region_name(), r.freq_mhz);
+    scr_row_create(scr1_1_list, "Radio", value, NULL, scr1_1_radio_event, NULL);
+
+    /* The position, and whether there is one to share, since a setting that
+     * says "on" while the GPS has no fix would be misleading. */
+    double lat, lon;
+    if(mesh_net_get_loc_policy() == MESH_LOC_OFF) {
+        lv_snprintf(value, sizeof(value), "Off");
+    } else if(mesh_net_get_position(&lat, &lon)) {
+        lv_snprintf(value, sizeof(value), "%s  %.4f, %.4f",
+                    mesh_net_loc_policy_name(), lat, lon);
+    } else {
+        lv_snprintf(value, sizeof(value), "%s  (no fix yet)", mesh_net_loc_policy_name());
+    }
+    scr_row_create(scr1_1_list, "Share location", value, NULL, scr1_1_location_event, NULL);
+
+    scr_row_create(scr1_1_list, "Companion app", mesh_companion_link_name(), NULL,
+                   scr1_1_companion_event, NULL);
+
+    scr_row_create(scr1_1_list, "Announce now", "Tell the mesh this node is here", NULL,
+                   scr1_1_advertise_event, NULL);
+}
+
 static void create1_1(lv_obj_t *parent)
 {
     char name[MESH_NET_NAME_LEN];
-    char key[16];
 
     mesh_net_get_self_name(name, sizeof(name));
-    mesh_net_get_self_key(key, sizeof(key));
+    scr1_1_name = scr_field_create(parent, "Name on the mesh", 38, name, MESH_NET_NAME_LEN - 1);
 
-    scr1_1_name = scr_field_create(parent, "Name on the mesh", 40, name, MESH_NET_NAME_LEN - 1);
+    scr1_1_list = scr_app_list_create(parent);
+    lv_obj_set_size(scr1_1_list, lv_pct(96), LV_VER_RES - 100 - 46);
+    lv_obj_align(scr1_1_list, LV_ALIGN_TOP_MID, 0, 100);
 
-    lv_obj_t *info = lv_label_create(parent);
-    lv_obj_set_width(info, lv_pct(92));
-    lv_obj_set_style_text_font(info, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-    lv_obj_set_style_text_color(info, DECKPRO_COLOR_FG, LV_PART_MAIN);
-    lv_label_set_long_mode(info, LV_LABEL_LONG_WRAP);
-    lv_label_set_text_fmt(info, "Key %s   Only nodes on the same settings are heard.", key);
-    lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 100);
+    scr1_1_populate();
 
-    lv_obj_t *bar = scr_action_bar_create(parent, 160);
-
-    char radio[56];
-    mesh_radio_t r;
-    mesh_net_get_radio(&r);
-    lv_snprintf(radio, sizeof(radio), LV_SYMBOL_SETTINGS "  %s  %.3f",
-                mesh_net_region_name(), r.freq_mhz);
-    scr_bar_btn_create(bar, radio, 190, scr1_1_radio_event, NULL);
-
-    scr_bar_btn_create(bar, LV_SYMBOL_UPLOAD "  Announce now", 190, scr1_1_advertise_event, NULL);
-    scr_bar_btn_create(bar, LV_SYMBOL_BLUETOOTH "  Companion app", 190,
-                       scr1_1_companion_event, NULL);
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
     scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr1_1_save_event, NULL);
     scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr1_1_btn_event_cb, NULL);
 
@@ -937,6 +987,9 @@ static void create1_1(lv_obj_t *parent)
 
 static void entry1_1(void)
 {
+    // Coming back from the radio or companion screens, the rows are stale.
+    scr1_1_populate();
+
     lv_group_focus_obj(scr1_1_name);
     ui_disp_full_refr();
 }
@@ -948,6 +1001,7 @@ static void exit1_1(void) {
 static void destroy1_1(void)
 {
     scr1_1_name = NULL;
+    scr1_1_list = NULL;
 }
 
 static scr_lifecycle_t screen1_1 = {
@@ -1496,15 +1550,6 @@ static void scr1_6_edit_event(lv_event_t *e)
     scr_mgr_push(SCREEN1_7_ID, false);
 }
 
-static const char *scr1_6_link_name(int link)
-{
-    switch(link) {
-        case MESH_LINK_BLE:  return "Bluetooth";
-        case MESH_LINK_WIFI: return "WiFi";
-        default:             return "Off";
-    }
-}
-
 static void scr1_6_populate(void)
 {
     char value[64];
@@ -1513,7 +1558,7 @@ static void scr1_6_populate(void)
 
     lv_obj_clean(scr1_6_list);
 
-    scr_row_create(scr1_6_list, "Link", scr1_6_link_name(link), NULL,
+    scr_row_create(scr1_6_list, "Link", mesh_companion_link_name(), NULL,
                    scr1_6_link_event, NULL);
 
     if(link == MESH_LINK_OFF) {

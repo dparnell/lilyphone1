@@ -109,6 +109,19 @@ screen offers presets and lets all four be set by hand:
 | US / Canada | 910.525 MHz | 250 kHz | 10 | 5 |
 
 Editing any value switches to a custom preset seeded from what was showing.
+**Sharing your position is off by default and is a three-way choice**, on *This
+node > Share location*: off, only when you press *Announce now*, or with every
+advert. The middle setting is the point of having three — an advert floods the
+mesh, gets relayed well past radio range and is readable by anyone running
+MeshCore, so sharing because you meant to is a different thing from sharing
+because a timer went off in your pocket.
+
+The position comes from the phone's own GPS. Without a fix nothing is shared
+whatever the setting says, and the row shows *(no fix yet)* rather than implying
+otherwise; announcing by hand in that state says so too. Nodes you hear carry
+their own position when they choose to share it, and that reaches a companion
+app whether or not you share yours — so you can see others without being seen.
+
 Changing settings retunes the radio and re-announces the node, since nobody on
 the new settings has heard it. The node listens and speaks for itself but does
 not relay for others, since a phone in a pocket makes a poor repeater and

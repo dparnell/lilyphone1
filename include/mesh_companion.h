@@ -34,6 +34,8 @@ enum {
  * the stack keeps the memory it claimed until the next restart. */
 int  mesh_companion_get_link(void);
 void mesh_companion_set_link(int link);
+/* The chosen link, named for showing. */
+const char *mesh_companion_link_name(void);
 
 /* Whether the link is set to come up, and the node is there for it to drive.
  *

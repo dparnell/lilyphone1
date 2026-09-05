@@ -36,6 +36,7 @@
 
 #include "mesh_net.h"
 #include "mesh_companion_int.h"
+#include "peripheral.h"
 #include "utilities.h"
 
 /* Declared here rather than by including the UI port header, which would drag
@@ -54,6 +55,10 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
  * there. */
 static int8_t tx_power_dbm  = MESH_TX_POWER_MAX;
 static bool   tx_power_pending = false;
+
+/* Off unless asked for: an advert floods the mesh, so a position in one travels
+ * further than the radio reaches and is readable by anyone running MeshCore. */
+static int    loc_policy = MESH_LOC_OFF;
 
 /* The presets. The wide ones are what the MeshCore community publishes per
  * region; the narrow one is what the mesh in Victoria actually runs, and the
@@ -488,6 +493,7 @@ static void region_save(void)
     prefs.putUChar("sf", custom_radio.spreading_factor);
     prefs.putUChar("cr", custom_radio.coding_rate);
     prefs.putChar("txpower", tx_power_dbm);
+    prefs.putInt("locpol", loc_policy);
     prefs.end();
 }
 
@@ -502,10 +508,50 @@ static void region_load(void)
     custom_radio.spreading_factor = prefs.getUChar("sf", custom_radio.spreading_factor);
     custom_radio.coding_rate      = prefs.getUChar("cr", custom_radio.coding_rate);
     tx_power_dbm                  = prefs.getChar("txpower", tx_power_dbm);
+    loc_policy                    = prefs.getInt("locpol", loc_policy);
     prefs.end();
 
     if(region_idx < 0 || region_idx >= MESH_REGION_COUNT) region_idx = 0;
     if(tx_power_dbm < -9 || tx_power_dbm > MESH_TX_POWER_MAX) tx_power_dbm = MESH_TX_POWER_MAX;
+    if(loc_policy < MESH_LOC_OFF || loc_policy > MESH_LOC_ALWAYS) loc_policy = MESH_LOC_OFF;
+}
+
+//************************************[ position ]******************************
+bool mesh_net_get_position(double *lat, double *lon)
+{
+    double la = 0, lo = 0;
+
+    /* The GPS driver only writes these once it has a valid fix, so all zeroes
+     * means it has never had one. Null Island is a fair thing to spend as a
+     * sentinel. */
+    gps_get_coord(&la, &lo);
+    if(la == 0.0 && lo == 0.0) return false;
+
+    if(lat) *lat = la;
+    if(lon) *lon = lo;
+    return true;
+}
+
+int mesh_net_get_loc_policy(void)
+{
+    return loc_policy;
+}
+
+void mesh_net_set_loc_policy(int policy)
+{
+    if(policy < MESH_LOC_OFF || policy > MESH_LOC_ALWAYS) return;
+
+    loc_policy = policy;
+    region_save();
+}
+
+const char *mesh_net_loc_policy_name(void)
+{
+    switch(loc_policy) {
+        case MESH_LOC_ON_ANNOUNCE: return "When I announce";
+        case MESH_LOC_ALWAYS:      return "With every advert";
+        default:                   return "Off";
+    }
 }
 
 int8_t mesh_net_get_tx_power(void)
@@ -582,6 +628,9 @@ void mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
     region_apply();
 }
 
+// Defined with the rest of the advert handling, below the task that calls it.
+static void advert_send(bool deliberate);
+
 //************************************[ the clock ]*****************************
 /* Keeping the mesh's clock in step with the phone's.
  *
@@ -629,7 +678,7 @@ static void mesh_task(void *param)
             radio_driver.setParams(r.freq_mhz, r.bandwidth_khz,
                                    r.spreading_factor, r.coding_rate);
             // Say hello on the new settings; nobody there has heard this node.
-            mesh_net_advertise();
+            advert_send(false);
         }
 
         if(tx_power_pending) {
@@ -644,7 +693,7 @@ static void mesh_task(void *param)
 
         if(millis() > next_advert) {
             next_advert = millis() + MESH_ADVERT_PERIOD_MS;
-            mesh_net_advertise();
+            advert_send(false);   // a timer went off, nobody asked
         }
 
         // Short enough not to miss a receive window, long enough to yield.
@@ -758,20 +807,47 @@ void mesh_net_set_self_name(const char *name)
     mesh_net_advertise();  // so everyone learns the new name
 }
 
-void mesh_net_advertise(void)
+/* Announcing this node.
+ *
+ * `deliberate` separates an advert the user asked for from the ones that go out
+ * on their own every few minutes, which is the whole point of the "when I
+ * announce" setting: share where you are because you meant to, not because a
+ * timer went off in your pocket. */
+static void advert_send(bool deliberate)
 {
     if(!mesh_running || the_mesh == NULL) return;
 
+    double lat = 0, lon = 0;
+    bool with_loc = (loc_policy == MESH_LOC_ALWAYS) ||
+                    (loc_policy == MESH_LOC_ON_ANNOUNCE && deliberate);
+
+    // No fix means no position, whatever the setting says.
+    if(with_loc && !mesh_net_get_position(&lat, &lon)) with_loc = false;
+
     uint8_t app_data[MAX_ADVERT_DATA_SIZE];
-    AdvertDataBuilder builder(ADV_TYPE_CHAT, self_name);
-    uint8_t len = builder.encodeTo(app_data);
+    uint8_t len;
+
+    if(with_loc) {
+        AdvertDataBuilder builder(ADV_TYPE_CHAT, self_name, lat, lon);
+        len = builder.encodeTo(app_data);
+    } else {
+        AdvertDataBuilder builder(ADV_TYPE_CHAT, self_name);
+        len = builder.encodeTo(app_data);
+    }
 
     mesh::Packet *pkt = the_mesh->createAdvert(the_mesh->self_id, app_data, len);
-    if(pkt) {
-        the_mesh->sendFlood(pkt);
-        packets_tx++;
-        Serial.println("[MESH] advertised");
-    }
+    if(pkt == NULL) return;
+
+    the_mesh->sendFlood(pkt);
+    packets_tx++;
+
+    if(with_loc) Serial.printf("[MESH] advertised from %.5f, %.5f\n", lat, lon);
+    else         Serial.println("[MESH] advertised");
+}
+
+void mesh_net_advertise(void)
+{
+    advert_send(true);
 }
 
 int mesh_net_node_count(void)

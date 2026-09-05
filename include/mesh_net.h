@@ -97,6 +97,29 @@ bool        mesh_net_region_is_custom(void);
 void        mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
                                 uint8_t spreading_factor, uint8_t coding_rate);
 
+/* Whether this node puts its position in the adverts it sends.
+ *
+ * Off by default, and a setting rather than a default because an advert floods
+ * the mesh: it is relayed well beyond radio range and anyone running MeshCore
+ * can read it. Contacts heard from carry their position when they choose to
+ * share it, so you can see others without being seen.
+ *
+ * The position comes from this device's own GPS, and an advert carries none
+ * when there is no fix. Persisted. */
+enum {
+    MESH_LOC_OFF = 0,      // never
+    MESH_LOC_ON_ANNOUNCE,  // only when the user asks for an advert
+    MESH_LOC_ALWAYS,       // every advert, including the periodic ones
+};
+
+int         mesh_net_get_loc_policy(void);
+void        mesh_net_set_loc_policy(int policy);
+const char *mesh_net_loc_policy_name(void);
+
+/* The position that would be shared. False when the GPS has no fix, in which
+ * case nothing is shared whatever the policy says. */
+bool        mesh_net_get_position(double *lat, double *lon);
+
 /* Transmit power in dBm. The ceiling is the SX1262's, not a legal limit - what
  * is allowed where you are is your business. Persisted. */
 #define MESH_TX_POWER_MAX 22
