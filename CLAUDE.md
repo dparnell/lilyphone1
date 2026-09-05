@@ -134,13 +134,20 @@ The modem is the only route to a speaker, via `modem_play_tone()` (`AT+CPTONE`).
 
 `src/apps/mesh_net.cpp` runs a MeshCore node and **owns the SX1262** — the vendor's `peri_lora.cpp` demo was removed because two drivers cannot share one radio. It runs on its own task, not an LVGL timer: a missed receive window loses a packet, and the LVGL task blocks for hundreds of milliseconds pushing frames to the panel.
 
+The node is a `BaseChatMesh` subclass. **MeshCore is not thread-safe and the UI never calls into it**: `mesh_net.cpp` mirrors the node list and the message log into its own tables under one mutex (`node_lock`, which guards both), and the LVGL task reads only those. A send is a note left in `send_pending` for `send_service()` to pick up on the mesh task. `mesh_net_revision()` is bumped on every change so a screen can decide whether a redraw — hundreds of milliseconds on this panel — is warranted.
+
+Two consequences of how MeshCore acknowledges messages:
+
+- **An ACK names a packet hash, not a message.** `processAck()` matches it against the one `pending_ack` it is waiting on, and `msg_settle()` applies the outcome to the newest still-sending entry in the log. Only one message may be in flight at a time (`mesh_net_send_busy()`), or the two could not be told apart.
+- **`getContactByIdx()` indexes past `MAX_ANON_CONTACTS` reserved slots** at the start of the contacts array. `MAX_ANON_CONTACTS` and `MAX_SEARCH_RESULTS` are `#define`d unconditionally in `BaseChatMesh.h` — setting them as build flags only produces a redefinition warning.
+
 Three things about the vendored dependencies are easy to trip over:
 
 - **RadioLib had to go to 7.x.** MeshCore uses `getIrqFlags()`, `clearIrqFlags()` and the `RADIOLIB_IRQ_*` constants, none of which exist in the 6.4.2 the project used to carry. This was safe only because retiring the LoRa demo left no other RadioLib user.
 - **RadioLib is built with `RADIOLIB_GODMODE=1`** (in `platformio.ini`), because MeshCore reaches into `SX126x::mod`, `spreadingFactor` and `freqMHz`, which are otherwise private. That is how MeshCore builds it upstream.
 - **`lib/MeshCore` is a curated subset**, not the upstream tree: upstream ships ~48 helpers for boards this project does not have (nRF52, STM32, RP2040, ethernet, BLE, sensors), and PlatformIO compiles everything under `lib/*/src`. Adding a MeshCore feature may mean vendoring another helper. Ed25519 comes from MeshCore's own bundled copy (`lib/ed25519`), while SHA-256 and AES come from `lib/Crypto`.
 
-The board adapter, radio settings and advertisement handling are all in `mesh_net.cpp`; the pin and region defines are build flags in `platformio.ini`.
+The board adapter, radio settings, advertisement handling and the chat engine are all in `mesh_net.cpp`; the pin, region and `MAX_CONTACTS` / `MAX_GROUP_CHANNELS` defines are build flags in `platformio.ini`. The public channel's PSK is the same well-known key every MeshCore node ships with — it is an open channel, not a secret one; privacy comes from messages addressed to a single node, which are encrypted to that node's key.
 
 ### Storage
 

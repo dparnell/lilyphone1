@@ -72,9 +72,29 @@ Two things to know before relying on it:
   channel, not a usable internet connection. Set a small MTU on the tunnel;
   anything over 1472 bytes is dropped rather than fragmented.
 
-**Mesh.** The phone is a [MeshCore](https://docs.meshcore.io/) node. It carries
-its own Ed25519 identity, announces itself on the LoRa network, and lists the
-nodes it hears with their signal and hop count.
+**Mesh.** The phone is a [MeshCore](https://docs.meshcore.io/) node: LoRa chat
+with no network, no SIM and no subscription, out to whatever is in radio range.
+It carries its own Ed25519 identity, announces itself, and lists the nodes it
+hears with their signal and hop count.
+
+That list is also the list of people to talk to — there is nobody to add,
+because nodes announce themselves and this one keeps whoever it hears. Tapping
+one opens a conversation; above them sits the public channel, which every
+MeshCore node on the frequency can read.
+
+A private message is encrypted to the far node's key and acknowledged end to
+end, so the conversation says **delivered** only once that node actually
+answered — more than a text message ever tells you. It goes down a known route
+where one exists and is flooded across the mesh where it does not, and gives up
+after a timeout scaled to the airtime and hop count, marking itself *not
+delivered*. A channel message is a broadcast that nobody acknowledges, so the
+most it can report is that it went out. One message is in flight at a time,
+because an acknowledgement names a packet rather than a message.
+
+Messages live in memory only, not on flash: a mesh conversation is a
+conversation in the moment, and writing every message through the filesystem
+would put SPIFFS in the path of the radio. An unread mesh message raises the
+same envelope on the taskbar and the lock screen as an unread text.
 
 Every node on a mesh has to agree on four radio settings exactly — frequency,
 bandwidth, spreading factor and coding rate — and getting any one wrong means
@@ -90,10 +110,9 @@ screen offers presets and lets all four be set by hand:
 
 Editing any value switches to a custom preset seeded from what was showing.
 Changing settings retunes the radio and re-announces the node, since nobody on
-the new settings has heard it. Messaging over the mesh is not
-wired up yet - this layer establishes the radio, the crypto and the protocol.
-The node listens and speaks for itself but does not relay for others, since a
-phone in a pocket makes a poor repeater and forwarding costs battery.
+the new settings has heard it. The node listens and speaks for itself but does
+not relay for others, since a phone in a pocket makes a poor repeater and
+forwarding costs battery.
 
 This replaced the vendor's LoRa demo screens: MeshCore expects to own the
 SX1262, and two drivers cannot share one radio.

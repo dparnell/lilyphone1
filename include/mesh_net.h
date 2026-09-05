@@ -16,6 +16,17 @@ extern "C" {
 #define MESH_NET_NAME_LEN  32
 #define MESH_NET_NODES_MAX 24
 
+/* A message is short by design: MeshCore packets are small and the airtime of a
+ * long one at spreading factor 10 is measured in seconds. */
+#define MESH_TEXT_LEN      161
+#define MESH_MSG_MAX       80
+
+// mesh_msg_t::status
+#define MESH_ST_OK         0   // received, or sent with nothing to wait for
+#define MESH_ST_SENDING    1
+#define MESH_ST_FAILED     2
+#define MESH_ST_DELIVERED  3   // the other end acknowledged it
+
 /*********************************************************************************
  *                                  TYPEDEFS
  * *******************************************************************************/
@@ -28,7 +39,21 @@ typedef struct {
     int16_t  rssi;
     uint32_t heard_ms;          // millis() when it was last heard
     uint8_t  hops;
+    uint8_t  has_path;          // a route back is known, so messages go direct
+    uint8_t  unread;            // messages from it that have not been looked at
 } mesh_node_t;
+
+/* One message in a mesh conversation. `peer` is the node it was with, or all
+ * zeroes when it was on the public channel, which every node can read. */
+typedef struct {
+    uint8_t  peer[4];
+    char     text[MESH_TEXT_LEN];
+    uint32_t at_ms;
+    uint8_t  outgoing;
+    uint8_t  status;
+    uint8_t  unread;
+    uint8_t  is_channel;
+} mesh_msg_t;
 
 /*********************************************************************************
  *                              GLOBAL PROTOTYPES
@@ -75,6 +100,35 @@ void        mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
 int  mesh_net_node_count(void);
 /* Copies out one heard node, newest first. False when `idx` is past the end. */
 bool mesh_net_get_node(int idx, mesh_node_t *out);
+
+/* --- chat ---
+ *
+ * There is nobody to add: nodes announce themselves and this one keeps whoever
+ * it hears, so the list of nodes above is also the list of people to talk to.
+ * A message goes either to one of them or to the public channel, which is the
+ * shared frequency-wide conversation everyone running MeshCore can read.
+ *
+ * Pass NULL as `peer` throughout to mean the public channel.
+ */
+const char *mesh_net_channel_name(void);
+
+/* Queues a message. It appears in the log immediately as sending, and settles
+ * to delivered or failed once the mesh has had its say. False when the radio is
+ * down, the text is too long, or one is already on its way. */
+bool mesh_net_send_text(const uint8_t peer[4], const char *text);
+/* True while a message is still in flight, which is when a send would fail. */
+bool mesh_net_send_busy(void);
+
+/* The log for one conversation, oldest first. */
+int  mesh_net_msg_count(const uint8_t peer[4]);
+bool mesh_net_get_msg(const uint8_t peer[4], int idx, mesh_msg_t *out);
+void mesh_net_mark_read(const uint8_t peer[4]);
+int  mesh_net_unread(const uint8_t peer[4]);
+int  mesh_net_unread_total(void);
+
+/* Bumped whenever the log or the node list changes, so a screen can tell at a
+ * glance whether it needs rebuilding - redrawing this display is expensive. */
+uint32_t mesh_net_revision(void);
 
 /* Counters, for telling "nothing is out there" apart from "the radio is deaf". */
 uint32_t mesh_net_packets_rx(void);

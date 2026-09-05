@@ -1,0 +1,6 @@
+{
+    "name": "base64",
+    "version": "1.3.0",
+    "description": "Densaugeo base64, needed by MeshCore group channels.",
+    "license": "MIT"
+}

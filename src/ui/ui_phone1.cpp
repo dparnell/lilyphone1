@@ -658,16 +658,30 @@ static scr_lifecycle_t screen0 = {
 #endif
 //************************************[ screen 1 ]****************************************** mesh
 #if 1
-/* The nodes this phone can hear on the MeshCore network.
+/* The nodes this phone can hear on the MeshCore network, and the public channel
+ * they all share. This doubles as the list of people to talk to: MeshCore nodes
+ * announce themselves periodically, so it fills in on its own once the radio is
+ * listening and there is nobody to add by hand.
  *
- * MeshCore nodes announce themselves periodically, so this list fills in on its
- * own once the radio is listening - there is nothing to press to make it
- * happen. An empty list after a few minutes means nobody is in range on these
- * settings, which is worth telling apart from a radio that never started, hence
- * the packet counts. */
+ * An empty list after a few minutes means nobody is in range on these settings,
+ * which is worth telling apart from a radio that never started, hence the
+ * packet counts in the header. */
 static lv_obj_t   *scr1_list   = NULL;
 static lv_obj_t   *scr1_header = NULL;
 static lv_timer_t *scr1_timer  = NULL;
+
+/* Which mesh conversation the conversation and compose screens are showing.
+ * The channel is not anybody's key, so it gets its own flag rather than a
+ * reserved value. */
+static uint8_t ui_mesh_peer[4]  = { 0 };
+static bool    ui_mesh_channel  = true;
+static char    ui_mesh_title[MESH_NET_NAME_LEN] = "";
+
+/* What the mesh_net chat calls take: NULL is the public channel. */
+static const uint8_t *ui_mesh_target(void)
+{
+    return ui_mesh_channel ? NULL : ui_mesh_peer;
+}
 
 static void scr1_btn_event_cb(lv_event_t * e)
 {
@@ -682,6 +696,27 @@ static void scr1_self_event(lv_event_t *e)
     scr_mgr_push(SCREEN1_1_ID, false);
 }
 
+static void scr1_channel_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    ui_mesh_channel = true;
+    lv_snprintf(ui_mesh_title, sizeof(ui_mesh_title), "%s", mesh_net_channel_name());
+    scr_mgr_push(SCREEN1_4_ID, false);
+}
+
+static void scr1_node_event(lv_event_t *e)
+{
+    mesh_node_t node;
+
+    if(!mesh_net_get_node((int)(intptr_t)lv_event_get_user_data(e), &node)) return;
+
+    ui_mesh_channel = false;
+    memcpy(ui_mesh_peer, node.pubkey_prefix, sizeof(ui_mesh_peer));
+    lv_snprintf(ui_mesh_title, sizeof(ui_mesh_title), "%s", node.name);
+    scr_mgr_push(SCREEN1_4_ID, false);
+}
+
 /* How long ago, in the shortest form that is still honest. */
 static void scr1_ago(char *buf, int len, uint32_t heard_ms)
 {
@@ -694,7 +729,20 @@ static void scr1_ago(char *buf, int len, uint32_t heard_ms)
 
 static void scr1_populate(void)
 {
+    char detail[64];
+    char right[16];
+
     lv_obj_clean(scr1_list);
+
+    /* The channel first, because it is the one conversation that is there
+     * before anybody has been heard from. */
+    int unread = mesh_net_unread(NULL);
+    lv_snprintf(detail, sizeof(detail), "Everyone in range");
+    if(unread > 0) lv_snprintf(right, sizeof(right), "%d new", unread);
+    else           right[0] = '\0';
+
+    scr_row_create(scr1_list, mesh_net_channel_name(), detail,
+                   right[0] ? right : NULL, scr1_channel_event, NULL);
 
     int count = mesh_net_node_count();
 
@@ -710,16 +758,17 @@ static void scr1_populate(void)
         mesh_node_t node;
         if(!mesh_net_get_node(i, &node)) continue;
 
-        char detail[64];
-        char ago[16];
+        scr1_ago(right, sizeof(right), node.heard_ms);
+        if(node.unread > 0) lv_snprintf(right, sizeof(right), "%d new", node.unread);
 
-        scr1_ago(ago, sizeof(ago), node.heard_ms);
-        lv_snprintf(detail, sizeof(detail), "%02X%02X%02X%02X  %d hop%s  snr %d",
+        lv_snprintf(detail, sizeof(detail), "%02X%02X%02X%02X  %d hop%s  snr %d%s",
                     node.pubkey_prefix[0], node.pubkey_prefix[1],
                     node.pubkey_prefix[2], node.pubkey_prefix[3],
-                    node.hops, node.hops == 1 ? "" : "s", node.snr);
+                    node.hops, node.hops == 1 ? "" : "s", node.snr,
+                    node.has_path ? "  routed" : "");
 
-        scr_row_create(scr1_list, node.name, detail, ago, scr1_self_event, NULL);
+        scr_row_create(scr1_list, node.name, detail, right,
+                       scr1_node_event, (void *)(intptr_t)i);
     }
 }
 
@@ -742,16 +791,12 @@ static void scr1_timer_event(lv_timer_t *t)
 {
     LV_UNUSED(t);
 
-    static int      shown_count = -1;
-    static uint32_t shown_rx    = 0xFFFFFFFF;
+    static uint32_t shown = 0xFFFFFFFF;
 
-    int      count = mesh_net_node_count();
-    uint32_t rx    = mesh_net_packets_rx();
-
-    // Only when something was actually heard: this panel is slow.
-    if(count == shown_count && rx == shown_rx) return;
-    shown_count = count;
-    shown_rx    = rx;
+    // Only when something was actually heard: this panel is slow to redraw.
+    uint32_t rev = mesh_net_revision();
+    if(rev == shown) return;
+    shown = rev;
 
     scr1_populate();
     scr1_render_header();
@@ -1129,6 +1174,265 @@ static scr_lifecycle_t screen1_3 = {
     .destroy = destroy1_3,
 };
 #endif
+// --------------------- screen 1.4 --------------------- mesh conversation
+#if 1
+/* What has been said with one node, or on the public channel.
+ *
+ * The same shape as the SMS conversation, deliberately - it is the same idea -
+ * but the differences are worth showing rather than hiding. A mesh message is
+ * stamped with how long ago it was rather than a clock time, because nodes do
+ * not agree on the time. And a private message is acknowledged end to end, so
+ * "delivered" here means the far node actually answered, which is more than a
+ * text message ever tells you; a channel message is a broadcast that nobody
+ * acknowledges, so the most it can say is that it went out. */
+static lv_obj_t   *scr1_4_cont  = NULL;
+static lv_timer_t *scr1_4_timer = NULL;
+static uint32_t    scr1_4_built = 0;
+
+static void scr1_4_populate(void);
+
+static void scr1_4_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr1_4_reply_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr_mgr_push(SCREEN1_5_ID, false);
+}
+
+static lv_coord_t scr1_4_bubble_create(lv_obj_t *parent, const mesh_msg_t *m, lv_coord_t y)
+{
+    char head[48];
+    char ago[16];
+
+    scr1_ago(ago, sizeof(ago), m->at_ms);
+
+    if(m->outgoing) {
+        const char *mark = (m->status == MESH_ST_SENDING)   ? "  sending..."
+                         : (m->status == MESH_ST_FAILED)    ? "  not delivered"
+                         : (m->status == MESH_ST_DELIVERED) ? "  delivered"
+                                                            : "  sent";
+        lv_snprintf(head, sizeof(head), "%s ago%s", ago, mark);
+    } else {
+        lv_snprintf(head, sizeof(head), "%s ago", ago);
+    }
+
+    lv_obj_t *bubble = lv_obj_create(parent);
+    lv_obj_set_width(bubble, 180);
+    lv_obj_set_height(bubble, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(bubble, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(bubble, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(bubble, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(bubble, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(bubble, 5, LV_PART_MAIN);
+    lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(bubble, m->outgoing ? 42 : 0, y);
+
+    lv_obj_t *text = lv_label_create(bubble);
+    lv_obj_set_width(text, lv_pct(100));
+    lv_obj_set_style_text_font(text, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(text, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+    lv_label_set_text_fmt(text, "%s\n%s", head, m->text);
+    if(m->outgoing) lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+
+    // The height only exists once the wrapped text has been laid out.
+    lv_obj_update_layout(bubble);
+    return y + lv_obj_get_height(bubble) + 6;
+}
+
+static void scr1_4_populate(void)
+{
+    const uint8_t *peer = ui_mesh_target();
+
+    lv_obj_clean(scr1_4_cont);
+
+    int total = mesh_net_msg_count(peer);
+
+    if(total == 0) {
+        scr_empty_note_create(scr1_4_cont,
+            ui_mesh_channel
+                ? "Nothing on the channel yet.\n\nAnything sent here goes to every node in range."
+                : "Nothing said yet.");
+        scr1_4_built = mesh_net_revision();
+        return;
+    }
+
+    /* Only the tail. Older messages are still in the log, but laying out and
+     * pushing a long conversation to this display is slow enough to feel it. */
+    int first = total > 12 ? total - 12 : 0;
+    lv_coord_t y = 0;
+
+    for(int i = first; i < total; i++) {
+        mesh_msg_t m;
+        if(!mesh_net_get_msg(peer, i, &m)) continue;
+
+        y = scr1_4_bubble_create(scr1_4_cont, &m, y);
+    }
+
+    lv_obj_update_layout(scr1_4_cont);
+    lv_obj_scroll_to_y(scr1_4_cont, lv_obj_get_scroll_bottom(scr1_4_cont), LV_ANIM_OFF);
+
+    scr1_4_built = mesh_net_revision();
+}
+
+/* A message can arrive, or one being sent can settle, while this is on screen.
+ * Both show up as a change of revision. */
+static void scr1_4_timer_event(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    if(mesh_net_revision() == scr1_4_built) return;
+
+    mesh_net_mark_read(ui_mesh_target());
+    scr1_4_populate();
+    ui_disp_full_refr();
+}
+
+static void create1_4(lv_obj_t *parent)
+{
+    scr1_4_cont = lv_obj_create(parent);
+    lv_obj_set_size(scr1_4_cont, lv_pct(96), LV_VER_RES - 36 - 44);
+    lv_obj_align(scr1_4_cont, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_set_style_bg_color(scr1_4_cont, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr1_4_cont, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(scr1_4_cont, 2, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(scr1_4_cont, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(scr1_4_cont, LV_SCROLLBAR_MODE_OFF);
+    scr_scroll_for_epaper(scr1_4_cont);
+
+    scr1_4_populate();
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_EDIT "  Reply", 106, scr1_4_reply_event, NULL);
+
+    scr_back_btn_create(parent, ui_mesh_title, scr1_4_back_event);
+}
+
+static void entry1_4(void)
+{
+    mesh_net_mark_read(ui_mesh_target());
+
+    if(scr1_4_built != mesh_net_revision()) scr1_4_populate();
+
+    if(scr1_4_timer == NULL) {
+        scr1_4_timer = lv_timer_create(scr1_4_timer_event, 3000, NULL);
+    }
+    ui_disp_full_refr();
+}
+
+static void exit1_4(void)
+{
+    if(scr1_4_timer) {
+        lv_timer_del(scr1_4_timer);
+        scr1_4_timer = NULL;
+    }
+    ui_disp_full_refr();
+}
+
+static void destroy1_4(void) { scr1_4_cont = NULL; }
+
+static scr_lifecycle_t screen1_4 = {
+    .create = create1_4,
+    .entry = entry1_4,
+    .exit  = exit1_4,
+    .destroy = destroy1_4,
+};
+#endif
+// --------------------- screen 1.5 --------------------- mesh compose
+#if 1
+static lv_obj_t *scr1_5_body   = NULL;
+static lv_obj_t *scr1_5_status = NULL;
+
+static void scr1_5_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr1_5_send_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    const char *body = lv_textarea_get_text(scr1_5_body);
+
+    if(body == NULL || body[0] == '\0') {
+        lv_label_set_text(scr1_5_status, "Nothing to send");
+        return;
+    }
+    if(mesh_net_send_busy()) {
+        lv_label_set_text(scr1_5_status, "Still sending the last one");
+        return;
+    }
+    if(!mesh_net_send_text(ui_mesh_target(), body)) {
+        lv_label_set_text(scr1_5_status, "The radio would not take it");
+        return;
+    }
+
+    /* Straight back to the conversation rather than waiting on the mesh: the
+     * message is already in the log as sending, and the screen behind shows it
+     * that way until it settles. */
+    scr_mgr_pop(false);
+}
+
+static void create1_5(lv_obj_t *parent)
+{
+    lv_obj_t *to = lv_label_create(parent);
+    lv_obj_set_width(to, lv_pct(92));
+    lv_obj_set_style_text_font(to, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(to, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(to, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(to, 18);
+    lv_obj_align(to, LV_ALIGN_TOP_LEFT, 10, 38);
+    lv_label_set_text_fmt(to, "To: %s", ui_mesh_title);
+
+    scr1_5_body = lv_textarea_create(parent);
+    lv_textarea_set_max_length(scr1_5_body, MESH_TEXT_LEN - 1);
+    lv_textarea_set_placeholder_text(scr1_5_body, "Message");
+    lv_obj_set_size(scr1_5_body, lv_pct(92), 148);
+    lv_obj_set_style_text_font(scr1_5_body, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_align(scr1_5_body, LV_ALIGN_TOP_MID, 0, 60);
+
+    scr1_5_status = lv_label_create(parent);
+    lv_obj_set_width(scr1_5_status, lv_pct(92));
+    lv_obj_set_style_text_font(scr1_5_status, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr1_5_status, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(scr1_5_status, LV_LABEL_LONG_WRAP);
+    lv_obj_align(scr1_5_status, LV_ALIGN_TOP_LEFT, 10, 212);
+    lv_label_set_text(scr1_5_status,
+                      ui_mesh_channel ? "Everyone in range can read this."
+                                      : "Encrypted to this node alone.");
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_UP "  Send", 106, scr1_5_send_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr1_5_back_event, NULL);
+
+    scr_back_btn_create(parent, "Mesh message", scr1_5_back_event);
+}
+
+static void entry1_5(void)
+{
+    lv_group_focus_obj(scr1_5_body);
+    ui_disp_full_refr();
+}
+
+static void exit1_5(void) { ui_disp_full_refr(); }
+
+static void destroy1_5(void)
+{
+    scr1_5_body   = NULL;
+    scr1_5_status = NULL;
+}
+
+static scr_lifecycle_t screen1_5 = {
+    .create = create1_5,
+    .entry = entry1_5,
+    .exit  = exit1_5,
+    .destroy = destroy1_5,
+};
+#endif
+
 //************************************[ screen 2 ]****************************************** Setting
 // --------------------- screen 2.1 --------------------- Time
 #if 1
@@ -4520,7 +4824,7 @@ static void scr15_render(void)
     if(scr15_clock == NULL) return;
 
     char when[48] = "--:--";
-    char detail[96];
+    char detail[160];
 
     if(system_clock_is_set()) {
         time_t    now = time(NULL);
@@ -4538,26 +4842,36 @@ static void scr15_render(void)
         strftime(date, sizeof(date), "%a %d %b", &tm_now);
     }
 
-    int unread = sms_unread_total();
+    /* What is waiting, from either radio. A count on its own says something is
+     * there but not whether it is worth unlocking for, so whoever wrote last is
+     * named where there is a name to give. */
+    char pending[96] = "";
+    int  pos = 0;
 
+    int unread = sms_unread_total();
     if(unread > 0) {
-        /* Name whoever wrote last: a count on its own says something is
-         * waiting but not whether it is worth unlocking for. */
         const char *from = NULL;
         for(int i = sms_count() - 1; i >= 0 && from == NULL; i--) {
             const sms_msg_t *m = sms_get(i);
             if(m && m->unread) from = contacts_display_name(m->number);
         }
 
-        lv_snprintf(detail, sizeof(detail), "%s\n\n%s %d unread\n%s%s\n\n%s %d%%",
-                    date, LV_SYMBOL_ENVELOPE, unread,
-                    from ? "from " : "", from ? from : "",
-                    ui_battert_27220_get_percent_level(), ui_battery_27220_get_percent());
-    } else {
-        lv_snprintf(detail, sizeof(detail), "%s\n\n%s %d%%",
-                    date, ui_battert_27220_get_percent_level(),
-                    ui_battery_27220_get_percent());
+        pos = lv_snprintf(pending, sizeof(pending), "\n\n%s %d unread\n%s%s",
+                          LV_SYMBOL_ENVELOPE, unread,
+                          from ? "from " : "", from ? from : "");
+        if(pos > (int)sizeof(pending) - 1) pos = (int)sizeof(pending) - 1;
     }
+
+    int mesh_unread = mesh_net_unread_total();
+    if(mesh_unread > 0) {
+        lv_snprintf(pending + pos, sizeof(pending) - pos, "\n\n%s %d on the mesh",
+                    LV_SYMBOL_ENVELOPE, mesh_unread);
+    }
+
+    lv_snprintf(detail, sizeof(detail), "%s%s\n\n%s %d%%",
+                date, pending,
+                ui_battert_27220_get_percent_level(), ui_battery_27220_get_percent());
+
     lv_label_set_text(scr15_detail, detail);
 }
 
@@ -4574,7 +4888,7 @@ static void scr15_timer_event(lv_timer_t *t)
     struct tm tm_now;
     localtime_r(&now, &tm_now);
 
-    int unread = sms_unread_total();
+    int unread = sms_unread_total() + mesh_net_unread_total();
     if(tm_now.tm_min == shown_minute && unread == shown_unread) return;
 
     shown_minute = tm_now.tm_min;
@@ -5169,7 +5483,9 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
         taskbar_statue[TASKBAR_ID_SIGNAL] = registered;
     }
 
-    uint16_t unread = sms_unread_total();
+    // Either radio: what the badge means is that something is waiting to be
+    // read, not which way it arrived.
+    uint16_t unread = sms_unread_total() + mesh_net_unread_total();
     if(taskbar_statue[TASKBAR_ID_UNREAD] != unread)
     {
         if(unread > 0) {
@@ -5336,6 +5652,8 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN1_1_ID,  &screen1_1);    //  - this node
     scr_mgr_register(SCREEN1_2_ID,  &screen1_2);    //  - radio settings
     scr_mgr_register(SCREEN1_3_ID,  &screen1_3);    //     - one value
+    scr_mgr_register(SCREEN1_4_ID,  &screen1_4);    //  - conversation
+    scr_mgr_register(SCREEN1_5_ID,  &screen1_5);    //     - compose
     scr_mgr_register(SCREEN2_ID,    &screen2);      // Setting
     scr_mgr_register(SCREEN2_1_ID,  &screen2_1);    //  - Time
     scr_mgr_register(SCREEN2_1_1_ID,&screen2_1_1);  //     - time zone picker

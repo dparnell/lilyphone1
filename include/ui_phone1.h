@@ -31,6 +31,8 @@ enum {
     SCREEN1_1_ID,
     SCREEN1_2_ID,  // mesh radio settings
     SCREEN1_3_ID,  // one radio value at a time
+    SCREEN1_4_ID,  // mesh conversation
+    SCREEN1_5_ID,  // mesh compose
     SCREEN2_ID,    // config
     SCREEN2_1_ID,  // time
     SCREEN2_1_1_ID,// time zone picker
