@@ -487,40 +487,67 @@ void ui_settings_load(void)
 
 static bool     prox_near     = false;
 static uint16_t prox_baseline = 0;
-static bool     prox_in_call  = false;
+static bool     prox_suppress = false;   // ...and whether it is being acted on
+static bool     prox_have_base = false;
+static bool     prox_was_in_call = false;
 static uint32_t prox_logged   = 0;
 
 void ui_setting_set_ear_detect(bool on)
 {
-    prox_enabled = on;
-    if(!on) prox_near = false;           // never leave the panel suppressed
+    prox_enabled   = on;
+    prox_have_base = false;              // take a fresh baseline where it stands
+    if(!on) prox_near = prox_suppress = false;   // never leave the panel dead
     notify_save();
+
+    Serial.printf("[PROX] ear detect %s\n", on ? "on" : "off");
 }
 
 bool ui_setting_get_ear_detect(void) { return prox_enabled; }
 
-bool ui_touch_suppressed(void) { return prox_near; }
+bool ui_touch_suppressed(void) { return prox_suppress; }
 
+/* Watching the sensor whenever the setting is on, rather than only during a
+ * call.
+ *
+ * Sampling only during a call was the obvious way round and the wrong one: the
+ * numbers these thresholds have to be set against could then only be seen by
+ * ringing somebody, and if nothing appeared there was no way to tell which of
+ * the preconditions had failed. Reading it always makes the sensor testable by
+ * waving a hand at the phone. Acting on the reading is still confined to a
+ * connected call, which is the part that matters for safety.
+ */
 void ui_proximity_tick(void)
 {
-    bool in_call = (ui_phone_get_call_state() == MODEM_CALL_ACTIVE);
-
-    if(!prox_enabled || !in_call || !peri_init_st[E_PERI_LTR_553ALS]) {
-        // Outside a call the panel is never suppressed, whatever the sensor says.
-        prox_near    = false;
-        prox_in_call = false;
+    if(!prox_enabled) {
+        prox_near = prox_suppress = false;
+        prox_have_base = false;
         return;
     }
 
-    uint16_t ps = LTR_553ALS_get_ps();
+    if(!peri_init_st[E_PERI_LTR_553ALS]) {
+        prox_suppress = false;
 
-    if(!prox_in_call) {
-        // The call has just connected and the phone is still being looked at,
-        // which makes this as good a reading of "nothing near" as there is.
-        prox_in_call  = true;
-        prox_baseline = ps;
-        prox_near     = false;
+        // Rarely, but not never: silence here was indistinguishable from the
+        // sensor working and seeing nothing.
+        if(millis() - prox_logged > 5000) {
+            prox_logged = millis();
+            Serial.println("[PROX] the light sensor did not start; ear detect cannot work");
+        }
+        return;
     }
+
+    uint16_t ps      = LTR_553ALS_get_ps();
+    bool     in_call = (ui_phone_get_call_state() == MODEM_CALL_ACTIVE);
+
+    /* A fresh baseline when the setting is switched on, and again when a call
+     * connects: both are moments when the phone is being looked at rather than
+     * held against a face. */
+    if(!prox_have_base || (in_call && !prox_was_in_call)) {
+        prox_have_base = true;
+        prox_baseline  = ps;
+        prox_near      = false;
+    }
+    prox_was_in_call = in_call;
 
     if(prox_near) {
         if(ps < prox_baseline + PROX_FAR_RISE) prox_near = false;
@@ -529,12 +556,16 @@ void ui_proximity_tick(void)
         if(ps > prox_baseline + PROX_NEAR_RISE && ps > PROX_MIN_NEAR) prox_near = true;
     }
 
-    // Once a second while a call is up, so the thresholds above can be set
-    // against what the sensor really reads rather than what it ought to.
+    prox_suppress = prox_near && in_call;
+
+    // Once a second, so the thresholds above can be set against what the sensor
+    // really reads rather than what it ought to.
     if(millis() - prox_logged > 1000) {
         prox_logged = millis();
-        Serial.printf("[PROX] %u (baseline %u) %s\n",
-                      (unsigned)ps, (unsigned)prox_baseline, prox_near ? "at ear" : "clear");
+        Serial.printf("[PROX] %u (baseline %u) %s%s\n",
+                      (unsigned)ps, (unsigned)prox_baseline,
+                      prox_near ? "near" : "clear",
+                      prox_suppress ? ", touch off" : (in_call ? ", in call" : ""));
     }
 }
 

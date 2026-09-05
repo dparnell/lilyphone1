@@ -214,9 +214,12 @@ connected, so a sensor stuck reporting "near" cannot lock the phone up. It
 suppresses touch only — the keyboard still works, so there is always a way to
 end the call. And its threshold is relative to a baseline taken when the call
 connects, because cover glass and ambient infrared both offset the reading and
-neither is the same on two devices or in two rooms. What the sensor reads is
-logged once a second during a call, so the thresholds can be set against the
-real thing.
+neither is the same on two devices or in two rooms.
+
+The sensor is watched whenever the setting is on, not only during a call, and
+what it reads is logged once a second — so it can be tested by turning the
+setting on and waving a hand at the phone, rather than by ringing somebody.
+Acting on the reading is still confined to a connected call.
 
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.

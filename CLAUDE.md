@@ -205,7 +205,7 @@ Numbers are compared by `phone_number_match()` (last 7 digits, digits only), so 
 
 Three properties keep a misreading from being serious, and any change here should preserve them:
 
-- **It only runs while a call is connected.** A sensor stuck at "near" cannot lock the phone up, because nothing asks it outside a call. `ui_setting_set_ear_detect(false)` also clears the flag rather than leaving the panel suppressed.
+- **It only *acts* while a call is connected.** A sensor stuck at "near" cannot lock the phone up, because `prox_suppress` is only ever set with a call up. The sensor is *sampled* whenever the setting is on — sampling only during a call meant the readings these thresholds are set against could only be seen by ringing somebody, and silence gave no clue which precondition had failed. Every idle path now says why, at least occasionally. `ui_setting_set_ear_detect(false)` also clears the flag rather than leaving the panel suppressed.
 - **It suppresses touch only.** The keyboard stays live, so there is always a way to end the call. A physical key needs travel; a capacitive panel needs only skin.
 - **The threshold is relative to a baseline** sampled when the call connects and allowed to follow the reading downward while nothing is near. Cover glass crosstalk and ambient infrared both offset the raw count, so a fixed threshold would be wrong on the next device or in the next room.
 
