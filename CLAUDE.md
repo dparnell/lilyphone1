@@ -141,6 +141,19 @@ Two consequences of how MeshCore acknowledges messages:
 - **An ACK names a packet hash, not a message.** `processAck()` matches it against the one `pending_ack` it is waiting on, and `msg_settle()` applies the outcome to the newest still-sending entry in the log. Only one message may be in flight at a time (`mesh_net_send_busy()`), or the two could not be told apart.
 - **`getContactByIdx()` indexes past `MAX_ANON_CONTACTS` reserved slots** at the start of the contacts array. `MAX_ANON_CONTACTS` and `MAX_SEARCH_RESULTS` are `#define`d unconditionally in `BaseChatMesh.h` — setting them as build flags only produces a redefinition warning.
 
+### The MeshCore companion protocol
+
+`src/apps/mesh_companion.cpp` lets a MeshCore companion app drive the same node the screen does. It runs on the mesh task and is serviced from `mesh_task()`, because every command it handles calls into `BaseChatMesh`.
+
+The seam is `src/apps/mesh_companion_int.h` — deliberately *not* the public header, so the UI cannot reach anything that touches MeshCore. `include/mesh_companion.h` is the UI's half: choose the link, read the status. The node calls `companion_*` from its `PhoneMesh` callbacks; the companion calls back only through `mesh_net.h`'s C API.
+
+- **This is not upstream's `MyMesh`.** Upstream's companion firmware is a whole `BaseChatMesh` subclass with its own `DataStore`, `NodePrefs`, `CayenneLPP` and `target.h`; vendoring it would mean two meshes fighting for one radio. Only the protocol was reimplemented — over the node that already exists — plus upstream's two transports (`lib/MeshCore/src/helpers/esp32/Serial{BLE,Wifi}Interface`), which are self-contained and were taken verbatim.
+- **`FIRMWARE_VER_CODE` is 7 on purpose.** The version code is a promise about which commands work. Claiming a recent one makes the app ask for custom variables, statistics and flood scoping during connection setup, and an error there can stall it. Raising it means implementing those first.
+- **Both senders share one ack path.** `BaseChatMesh` keeps a single `txt_send_timeout` for the last message sent, whoever sent it, so `PhoneMesh::onSendTimeout()` only settles the local log when `pending_ack` is set — otherwise an app send timing out would mark one of *our* messages as lost. `processAck()` checks the companion's table (several may be outstanding) before the UI's single pending ack.
+- **Contacts are not persisted.** They are rebuilt from adverts, so an app that reconnects after a reboot re-adds what this node has not heard yet. Adding persistence means a store the mesh task can write without blocking on SPIFFS.
+- **The two links are mutually exclusive**, and the WiFi one also excludes the UDP hotspot — both put the one WiFi radio into access-point mode. `BLEDevice::init()` cannot be undone, so disabling Bluetooth only stops it advertising.
+- Link changes are applied on the mesh task via `link_pending`, the same note-leaving pattern as `region_pending`: `WiFi.softAP()` and the BLE bring-up both block, and must not run on the LVGL task.
+
 Three things about the vendored dependencies are easy to trip over:
 
 - **RadioLib had to go to 7.x.** MeshCore uses `getIrqFlags()`, `clearIrqFlags()` and the `RADIOLIB_IRQ_*` constants, none of which exist in the 6.4.2 the project used to carry. This was safe only because retiring the LoRa demo left no other RadioLib user.

@@ -8,6 +8,7 @@
 #include "timezone_db.h"
 #include "udp_relay.h"
 #include "mesh_net.h"
+#include "mesh_companion.h"
 #include "Arduino.h"
 
 #define SETTING_PAGE_MAX_ITEM 7
@@ -892,6 +893,12 @@ static void scr1_1_radio_event(lv_event_t *e)
     scr_mgr_push(SCREEN1_2_ID, false);
 }
 
+static void scr1_1_companion_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr_mgr_push(SCREEN1_6_ID, false);
+}
+
 static void create1_1(lv_obj_t *parent)
 {
     char name[MESH_NET_NAME_LEN];
@@ -907,10 +914,10 @@ static void create1_1(lv_obj_t *parent)
     lv_obj_set_style_text_font(info, FONT_BOLD_SIZE_15, LV_PART_MAIN);
     lv_obj_set_style_text_color(info, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_label_set_long_mode(info, LV_LABEL_LONG_WRAP);
-    lv_label_set_text_fmt(info, "Key %s\n\nOnly nodes on the same region are heard.", key);
-    lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 108);
+    lv_label_set_text_fmt(info, "Key %s   Only nodes on the same settings are heard.", key);
+    lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 100);
 
-    lv_obj_t *bar = scr_action_bar_create(parent, 124);
+    lv_obj_t *bar = scr_action_bar_create(parent, 160);
 
     char radio[56];
     mesh_radio_t r;
@@ -920,6 +927,8 @@ static void create1_1(lv_obj_t *parent)
     scr_bar_btn_create(bar, radio, 190, scr1_1_radio_event, NULL);
 
     scr_bar_btn_create(bar, LV_SYMBOL_UPLOAD "  Announce now", 190, scr1_1_advertise_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_BLUETOOTH "  Companion app", 190,
+                       scr1_1_companion_event, NULL);
     scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr1_1_save_event, NULL);
     scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr1_1_btn_event_cb, NULL);
 
@@ -1430,6 +1439,268 @@ static scr_lifecycle_t screen1_5 = {
     .entry = entry1_5,
     .exit  = exit1_5,
     .destroy = destroy1_5,
+};
+#endif
+
+// --------------------- screen 1.6 --------------------- companion app
+#if 1
+/* Letting a MeshCore companion app drive this node.
+ *
+ * The app talks the MeshCore companion protocol over either Bluetooth or WiFi,
+ * and gets the same node the screen does - the same identity, the same
+ * contacts, the same conversations. One link at a time: each radio wants a
+ * sizeable bite of memory, and the WiFi link puts this device up as an access
+ * point, which it cannot do while the hotspot has the radio.
+ */
+static lv_obj_t   *scr1_6_list  = NULL;
+static lv_timer_t *scr1_6_timer = NULL;
+
+// Which value screen 1.7 is editing.
+enum {
+    SCR1_6_EDIT_SSID = 0,
+    SCR1_6_EDIT_PASS,
+};
+static int scr1_6_editing = SCR1_6_EDIT_SSID;
+
+static void scr1_6_populate(void);
+
+static void scr1_6_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+/* A row that only reports something. Rows are buttons, so they need a callback
+ * whether or not there is anything to do with a press. */
+static void scr1_6_inert_event(lv_event_t *e) { LV_UNUSED(e); }
+
+static void scr1_6_link_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    int next = (mesh_companion_get_link() + 1) % 3;
+
+    if(next == MESH_LINK_WIFI && udp_relay_is_on()) {
+        ui_notice("WiFi link",
+                  "The hotspot is using the WiFi radio.\n\nTurn it off first.");
+        next = MESH_LINK_OFF;
+    }
+
+    mesh_companion_set_link(next);
+    scr1_6_populate();
+    ui_disp_full_refr();
+}
+
+static void scr1_6_edit_event(lv_event_t *e)
+{
+    scr1_6_editing = (int)(intptr_t)lv_event_get_user_data(e);
+    scr_mgr_push(SCREEN1_7_ID, false);
+}
+
+static const char *scr1_6_link_name(int link)
+{
+    switch(link) {
+        case MESH_LINK_BLE:  return "Bluetooth";
+        case MESH_LINK_WIFI: return "WiFi";
+        default:             return "Off";
+    }
+}
+
+static void scr1_6_populate(void)
+{
+    char value[64];
+    char detail[64];
+    int  link = mesh_companion_get_link();
+
+    lv_obj_clean(scr1_6_list);
+
+    scr_row_create(scr1_6_list, "Link", scr1_6_link_name(link), NULL,
+                   scr1_6_link_event, NULL);
+
+    if(link == MESH_LINK_OFF) {
+        scr_empty_note_create(scr1_6_list,
+            "Off.\n\nTurn the link on to let a MeshCore app on your phone use "
+            "this node's radio and identity.");
+        return;
+    }
+
+    /* What is actually happening, which is the first thing anybody looks at
+     * when an app will not connect. */
+    mesh_companion_get_detail(detail, sizeof(detail));
+    if(detail[0]) {
+        lv_snprintf(value, sizeof(value), "%s", detail);
+    } else if(mesh_companion_is_connected()) {
+        lv_snprintf(value, sizeof(value), "App connected");
+    } else {
+        lv_snprintf(value, sizeof(value), "Waiting for an app");
+    }
+    scr_row_create(scr1_6_list, "Status", value, NULL, scr1_6_inert_event, NULL);
+
+    if(link == MESH_LINK_BLE) {
+        mesh_companion_ble_name(value, sizeof(value));
+        scr_row_create(scr1_6_list, "Bluetooth name", value, NULL,
+                       scr1_6_inert_event, NULL);
+
+        lv_snprintf(value, sizeof(value), "%06u", (unsigned)mesh_companion_ble_pin());
+        scr_row_create(scr1_6_list, "Pairing code", value, NULL,
+                       scr1_6_inert_event, NULL);
+    } else {
+        char ssid[MESH_LINK_SSID_LEN];
+        char pass[MESH_LINK_PASS_LEN];
+        mesh_companion_get_wifi(ssid, sizeof(ssid), pass, sizeof(pass));
+
+        scr_row_create(scr1_6_list, "Network", ssid, NULL,
+                       scr1_6_edit_event, (void *)(intptr_t)SCR1_6_EDIT_SSID);
+
+        // Under eight characters is not a password WPA2 will take, so the
+        // network runs open instead - which is worth saying plainly.
+        scr_row_create(scr1_6_list, "Password",
+                       strlen(pass) < 8 ? "(open network)" : pass, NULL,
+                       scr1_6_edit_event, (void *)(intptr_t)SCR1_6_EDIT_PASS);
+
+        mesh_companion_get_address(value, sizeof(value));
+        scr_row_create(scr1_6_list, "Connect to", value[0] ? value : "not up yet", NULL,
+                       scr1_6_inert_event, NULL);
+    }
+
+    lv_snprintf(value, sizeof(value), "%u in  %u out",
+                (unsigned)mesh_companion_frames_rx(), (unsigned)mesh_companion_frames_tx());
+    scr_row_create(scr1_6_list, "Frames", value, NULL, scr1_6_inert_event, NULL);
+
+    int queued = mesh_companion_queued();
+    if(queued > 0) {
+        lv_snprintf(value, sizeof(value), "%d message%s", queued, queued == 1 ? "" : "s");
+        scr_row_create(scr1_6_list, "Held for the app", value, NULL,
+                       scr1_6_inert_event, NULL);
+    }
+}
+
+/* The link comes up on the mesh task, so nothing here knows when it happened
+ * except by looking. Only redraws when something changed - this panel is slow. */
+static void scr1_6_timer_event(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+
+    static int      shown_state  = -1;
+    static uint32_t shown_frames = 0xFFFFFFFF;
+
+    int      state  = mesh_companion_is_connected() ? 1 : 0;
+    uint32_t frames = mesh_companion_frames_rx() + mesh_companion_frames_tx();
+
+    if(state == shown_state && frames == shown_frames) return;
+    shown_state  = state;
+    shown_frames = frames;
+
+    scr1_6_populate();
+    ui_disp_full_refr();
+}
+
+static void create1_6(lv_obj_t *parent)
+{
+    scr1_6_list = scr_app_list_create(parent);
+    lv_obj_set_size(scr1_6_list, lv_pct(96), LV_VER_RES - 40);
+    lv_obj_align(scr1_6_list, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    scr1_6_populate();
+
+    scr_back_btn_create(parent, "Companion app", scr1_6_back_event);
+}
+
+static void entry1_6(void)
+{
+    scr1_6_populate();
+
+    if(scr1_6_timer == NULL) {
+        scr1_6_timer = lv_timer_create(scr1_6_timer_event, 2000, NULL);
+    }
+    ui_disp_full_refr();
+}
+
+static void exit1_6(void)
+{
+    if(scr1_6_timer) {
+        lv_timer_del(scr1_6_timer);
+        scr1_6_timer = NULL;
+    }
+    ui_disp_full_refr();
+}
+
+static void destroy1_6(void) { scr1_6_list = NULL; }
+
+static scr_lifecycle_t screen1_6 = {
+    .create = create1_6,
+    .entry = entry1_6,
+    .exit  = exit1_6,
+    .destroy = destroy1_6,
+};
+#endif
+// --------------------- screen 1.7 --------------------- one companion setting
+#if 1
+static lv_obj_t *scr1_7_field = NULL;
+
+static void scr1_7_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr1_7_save_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    const char *text = lv_textarea_get_text(scr1_7_field);
+    if(text == NULL) return;
+
+    if(scr1_6_editing == SCR1_6_EDIT_SSID) mesh_companion_set_wifi(text, NULL);
+    else                                   mesh_companion_set_wifi(NULL, text);
+
+    scr_mgr_pop(false);
+}
+
+static void create1_7(lv_obj_t *parent)
+{
+    char ssid[MESH_LINK_SSID_LEN];
+    char pass[MESH_LINK_PASS_LEN];
+
+    mesh_companion_get_wifi(ssid, sizeof(ssid), pass, sizeof(pass));
+
+    bool is_ssid = (scr1_6_editing == SCR1_6_EDIT_SSID);
+    const char *title = is_ssid ? "Network name" : "Password";
+
+    scr1_7_field = scr_field_create(parent, title, 38,
+                                    is_ssid ? ssid : pass,
+                                    is_ssid ? MESH_LINK_SSID_LEN - 1 : MESH_LINK_PASS_LEN - 1);
+
+    lv_obj_t *hint = lv_label_create(parent);
+    lv_obj_set_width(hint, lv_pct(92));
+    lv_obj_set_style_text_font(hint, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(hint, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 92);
+    lv_label_set_text(hint, is_ssid
+        ? "The network your phone joins before the app can reach this node."
+        : "Eight characters or more, or leave it short to run the network open.");
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr1_7_save_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr1_7_back_event, NULL);
+
+    scr_back_btn_create(parent, title, scr1_7_back_event);
+}
+
+static void entry1_7(void)
+{
+    lv_group_focus_obj(scr1_7_field);
+    ui_disp_full_refr();
+}
+
+static void exit1_7(void) { ui_disp_full_refr(); }
+
+static void destroy1_7(void) { scr1_7_field = NULL; }
+
+static scr_lifecycle_t screen1_7 = {
+    .create = create1_7,
+    .entry = entry1_7,
+    .exit  = exit1_7,
+    .destroy = destroy1_7,
 };
 #endif
 
@@ -5654,6 +5925,8 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN1_3_ID,  &screen1_3);    //     - one value
     scr_mgr_register(SCREEN1_4_ID,  &screen1_4);    //  - conversation
     scr_mgr_register(SCREEN1_5_ID,  &screen1_5);    //     - compose
+    scr_mgr_register(SCREEN1_6_ID,  &screen1_6);    //  - companion app link
+    scr_mgr_register(SCREEN1_7_ID,  &screen1_7);    //     - one setting
     scr_mgr_register(SCREEN2_ID,    &screen2);      // Setting
     scr_mgr_register(SCREEN2_1_ID,  &screen2_1);    //  - Time
     scr_mgr_register(SCREEN2_1_1_ID,&screen2_1_1);  //     - time zone picker

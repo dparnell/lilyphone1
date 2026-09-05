@@ -35,6 +35,7 @@
 #include <helpers/radiolib/CustomSX1262Wrapper.h>
 
 #include "mesh_net.h"
+#include "mesh_companion_int.h"
 #include "utilities.h"
 
 /* Declared here rather than by including the UI port header, which would drag
@@ -51,7 +52,8 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
  * bandwidth with a lower spreading factor - so if nothing is ever heard on the
  * right frequency, that is the next thing to check against whoever else is out
  * there. */
-#define MESH_TX_POWER_DBM 22
+static int8_t tx_power_dbm  = MESH_TX_POWER_MAX;
+static bool   tx_power_pending = false;
 
 /* The presets. The wide ones are what the MeshCore community publishes per
  * region; the narrow one is what the mesh in Victoria actually runs, and the
@@ -263,20 +265,32 @@ public:
                     contact.out_path_len != OUT_PATH_UNKNOWN,
                     _radio->getLastSNR(), _radio->getLastRSSI());
         packets_rx++;
+
+        companion_on_advert(contact, is_new);
     }
 
     void onContactPathUpdated(const ContactInfo &contact) override {
         node_record(contact.id, contact.name, contact.out_path_len,
                     contact.out_path_len != OUT_PATH_UNKNOWN,
                     _radio->getLastSNR(), _radio->getLastRSSI());
+
+        companion_on_path_updated(contact);
     }
 
+    /* An acknowledgement answers whoever sent the message - the app, or this
+     * device's own screen. The app's outstanding sends are checked first
+     * because there may be several of them, where there is only ever one of
+     * ours. */
     ContactInfo *processAck(const uint8_t *data) override {
+        packets_rx++;
+
+        ContactInfo *from = companion_process_ack(this, data);
+        if(from) return from;
+
         if(pending_ack == 0 || memcmp(data, &pending_ack, 4) != 0) return NULL;
 
         msg_settle(MESH_ST_DELIVERED);
         pending_ack = 0;
-        packets_rx++;
 
         return lookupContactByPubKey(pending_key, sizeof(pending_key));
     }
@@ -285,6 +299,10 @@ public:
                        uint32_t sender_timestamp, const char *text) override {
         msg_add(contact.id.pub_key, text, false, MESH_ST_OK, true, false);
         packets_rx++;
+
+        // Delivered to both: this device shows it, and the app can collect it.
+        companion_queue_msg(contact, pkt, sender_timestamp, TXT_TYPE_PLAIN, text);
+
         Serial.printf("[MESH] %s: %s\n", contact.name, text);
     }
 
@@ -299,14 +317,20 @@ public:
         // MeshCore puts "<sender>: " on the front of channel text already.
         msg_add(NULL, text, false, MESH_ST_OK, true, true);
         packets_rx++;
+
+        companion_queue_channel_msg(findChannelIdx(channel), pkt, timestamp, text);
+
         Serial.printf("[MESH] channel: %s\n", text);
     }
 
-    /* Commands are for repeaters and room servers to act on. A phone has no
-     * answer for one, but it should not be mistaken for something somebody
-     * said either, so it is dropped rather than logged. */
+    /* Commands are for repeaters and room servers to act on. This device has no
+     * answer for one and does not show it as something somebody said, but a
+     * companion app driving a repeater is exactly who asked for it, so it is
+     * passed along rather than dropped. */
     void onCommandDataRecv(const ContactInfo &contact, mesh::Packet *pkt,
-                           uint32_t sender_timestamp, const char *text) override { }
+                           uint32_t sender_timestamp, const char *text) override {
+        companion_queue_msg(contact, pkt, sender_timestamp, TXT_TYPE_CLI_DATA, text);
+    }
 
     /* Nothing is served from here, so a request gets an empty reply. */
     uint8_t onContactRequest(const ContactInfo &contact, uint32_t sender_timestamp,
@@ -329,7 +353,14 @@ public:
         return 6000 + ((pkt_airtime_millis * 2) * (path_len + 2));
     }
 
+    /* BaseChatMesh keeps one timeout for the last message sent, whoever sent
+     * it, so only settle the log when the outstanding send is this device's -
+     * otherwise a message the app sent would mark one of ours as lost. The app
+     * times its own sends out, which is what the estimate in the reply to
+     * CMD_SEND_TXT_MSG is for. */
     void onSendTimeout() override {
+        if(pending_ack == 0) return;
+
         msg_settle(MESH_ST_FAILED);
         pending_ack = 0;
         Serial.println("[MESH] no acknowledgement, giving up");
@@ -447,6 +478,7 @@ static void region_save(void)
     prefs.putFloat("bw", custom_radio.bandwidth_khz);
     prefs.putUChar("sf", custom_radio.spreading_factor);
     prefs.putUChar("cr", custom_radio.coding_rate);
+    prefs.putChar("txpower", tx_power_dbm);
     prefs.end();
 }
 
@@ -460,9 +492,27 @@ static void region_load(void)
     custom_radio.bandwidth_khz    = prefs.getFloat("bw", custom_radio.bandwidth_khz);
     custom_radio.spreading_factor = prefs.getUChar("sf", custom_radio.spreading_factor);
     custom_radio.coding_rate      = prefs.getUChar("cr", custom_radio.coding_rate);
+    tx_power_dbm                  = prefs.getChar("txpower", tx_power_dbm);
     prefs.end();
 
     if(region_idx < 0 || region_idx >= MESH_REGION_COUNT) region_idx = 0;
+    if(tx_power_dbm < -9 || tx_power_dbm > MESH_TX_POWER_MAX) tx_power_dbm = MESH_TX_POWER_MAX;
+}
+
+int8_t mesh_net_get_tx_power(void)
+{
+    return tx_power_dbm;
+}
+
+void mesh_net_set_tx_power(int8_t dbm)
+{
+    if(dbm < -9 || dbm > MESH_TX_POWER_MAX) return;
+
+    tx_power_dbm = dbm;
+    region_save();
+
+    // Same reason as a retune: the radio belongs to the mesh task.
+    tx_power_pending = true;
 }
 
 void mesh_net_get_radio(mesh_radio_t *out)
@@ -540,7 +590,13 @@ static void mesh_task(void *param)
             mesh_net_advertise();
         }
 
+        if(tx_power_pending) {
+            tx_power_pending = false;
+            radio.setOutputPower(tx_power_dbm);
+        }
+
         send_service();
+        companion_service();
         the_mesh->loop();
 
         if(millis() > next_advert) {
@@ -600,7 +656,11 @@ bool mesh_net_init(void)
     mesh_radio_t r;
     mesh_net_get_radio(&r);
     radio_driver.setParams(r.freq_mhz, r.bandwidth_khz, r.spreading_factor, r.coding_rate);
-    radio.setOutputPower(MESH_TX_POWER_DBM);
+    radio.setOutputPower(tx_power_dbm);
+
+    /* The companion protocol drives the same node the screen does, so it is
+     * attached once the mesh exists and serviced from the same task. */
+    companion_attach(the_mesh);
 
     char key[16];
     mesh_net_get_self_key(key, sizeof(key));

@@ -97,6 +97,12 @@ bool        mesh_net_region_is_custom(void);
 void        mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
                                 uint8_t spreading_factor, uint8_t coding_rate);
 
+/* Transmit power in dBm. The ceiling is the SX1262's, not a legal limit - what
+ * is allowed where you are is your business. Persisted. */
+#define MESH_TX_POWER_MAX 22
+int8_t      mesh_net_get_tx_power(void);
+void        mesh_net_set_tx_power(int8_t dbm);
+
 int  mesh_net_node_count(void);
 /* Copies out one heard node, newest first. False when `idx` is past the end. */
 bool mesh_net_get_node(int idx, mesh_node_t *out);

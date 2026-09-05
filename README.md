@@ -117,6 +117,38 @@ forwarding costs battery.
 This replaced the vendor's LoRa demo screens: MeshCore expects to own the
 SX1262, and two drivers cannot share one radio.
 
+**Companion app.** A MeshCore companion app — the official phone app, or
+anything else speaking the same protocol — can drive this node over either
+Bluetooth or WiFi. It gets the same node the screen does: the same identity, the
+same contacts, the same conversations, so a message sent from the app and one
+typed here go out over the same key, and a message that arrives is delivered to
+both. This is unlike a stock companion radio, where the app *is* the entire user
+interface.
+
+*This node > Companion app* picks the link:
+
+- **Bluetooth** advertises as `MeshCore-<node name>` and pairs with a six-digit
+  code shown on that screen. The code is generated once and kept, so a paired
+  phone stays paired across reboots.
+- **WiFi** puts the device up as an access point and listens for the app on TCP
+  port 5000, showing the address to connect to. It cannot run while the UDP
+  hotspot is on — both want the one WiFi radio in access-point mode — and the
+  screen says so rather than failing quietly.
+
+One link at a time, and turning Bluetooth off only stops it advertising: the
+Bluetooth stack keeps the memory it claimed until the next restart.
+
+Messages that arrive while no app is connected are held — sixteen of them — and
+handed over when one connects, so a conversation is not lost because the phone
+was in somebody's pocket. Contacts are not persisted: they are rebuilt from the
+adverts nodes send anyway, so an app reconnecting after a restart re-adds
+whatever this node has not heard from yet.
+
+The node reports protocol version 7 and answers anything newer with "unsupported
+command" rather than going quiet. Everything a conversation needs is there —
+contacts, messages, channels, radio settings, device time, adverts — while
+custom variables, statistics, telemetry, signing and flood scoping are not.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 
@@ -164,7 +196,8 @@ src/ui/               every screen (ui_phone1.cpp), the hardware wrappers they
                       call (ui_phone1_port.cpp), and the screen stack
 src/peripherals/      one file per device; peri_modem.cpp owns the modem
 src/apps/             contacts and message storage, the clock, the zone table,
-                      the MeshCore node, the hotspot relay
+                      the MeshCore node and its companion protocol, the hotspot
+                      relay
 src/assets/           fonts and icons, some generated
 tools/                the emoji font generator
 ```

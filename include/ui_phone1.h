@@ -33,6 +33,8 @@ enum {
     SCREEN1_3_ID,  // one radio value at a time
     SCREEN1_4_ID,  // mesh conversation
     SCREEN1_5_ID,  // mesh compose
+    SCREEN1_6_ID,  // companion app link
+    SCREEN1_7_ID,  // one companion setting at a time
     SCREEN2_ID,    // config
     SCREEN2_1_ID,  // time
     SCREEN2_1_1_ID,// time zone picker
