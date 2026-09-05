@@ -267,6 +267,7 @@ public:
         packets_rx++;
 
         companion_on_advert(contact, is_new);
+        companion_note_advert_path(contact, path_len, path);
     }
 
     void onContactPathUpdated(const ContactInfo &contact) override {

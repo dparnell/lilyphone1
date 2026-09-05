@@ -25,6 +25,12 @@ ContactInfo *companion_process_ack(BaseChatMesh *chat, const uint8_t *data);
 
 /* Somebody was heard from, or a route to them changed. */
 void companion_on_advert(const ContactInfo &contact, bool is_new);
+
+/* The path an advert arrived over - the route *in*, which is not the route out
+ * that MeshCore keeps on the contact, and is what the app asks for when it
+ * shows how a node is reached. */
+void companion_note_advert_path(const ContactInfo &contact, uint8_t path_len,
+                                const uint8_t *path);
 void companion_on_path_updated(const ContactInfo &contact);
 
 /* Something was said. Held for the app to collect with SYNC_NEXT_MESSAGE, so

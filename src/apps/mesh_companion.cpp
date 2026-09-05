@@ -87,7 +87,11 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
 #define CMD_GET_CHANNEL            31
 #define CMD_SET_CHANNEL            32
 #define CMD_SET_OTHER_PARAMS       38
+#define CMD_GET_ADVERT_PATH        42
 #define CMD_GET_TUNING_PARAMS      43
+#define CMD_SET_FLOOD_SCOPE_KEY    54
+#define CMD_SET_DEFAULT_FLOOD_SCOPE 63
+#define CMD_GET_DEFAULT_FLOOD_SCOPE 64
 
 #define RESP_CODE_OK                  0
 #define RESP_CODE_ERR                 1
@@ -106,7 +110,9 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
 #define RESP_CODE_CONTACT_MSG_RECV_V3 16
 #define RESP_CODE_CHANNEL_MSG_RECV_V3 17
 #define RESP_CODE_CHANNEL_INFO        18
+#define RESP_CODE_ADVERT_PATH         22
 #define RESP_CODE_TUNING_PARAMS       23
+#define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
 
 // Sent to the app whenever, rather than in answer to anything.
 #define PUSH_CODE_ADVERT           0x80
@@ -171,6 +177,22 @@ struct ack_wait_t {
 };
 static ack_wait_t ack_table[ACK_TABLE_SIZE];
 static int        next_ack_idx = 0;
+
+/* Where the last advert from each node arrived over.
+ *
+ * The app asks for this to show how a node reaches here. It is not the same as
+ * the path in MeshCore's contact record, which is the route *out* to that node
+ * - so it has to be kept separately, from the inbound path handed to
+ * onDiscoveredContact(). A small circular table; the least recently heard is
+ * the one that goes when it is full. */
+#define ADVERT_PATH_TABLE_SIZE 16
+struct advert_path_t {
+    uint8_t  pubkey_prefix[7];
+    uint8_t  path_len;
+    uint32_t recv_timestamp;   // zero means the slot has never been used
+    uint8_t  path[MAX_PATH_SIZE];
+};
+static advert_path_t advert_paths[ADVERT_PATH_TABLE_SIZE];
 
 /* A contacts listing in progress. The app asks once and the contacts are then
  * fed out one frame per pass, so that a long list does not monopolise the mesh
@@ -863,6 +885,46 @@ static void handle_frame(int len)
             write_ok();
         }
 
+    } else if(cmd == CMD_GET_ADVERT_PATH && len >= PUB_KEY_SIZE + 2) {
+        // cmd_frame[1] is reserved; the key follows it.
+        const uint8_t *pub_key = &cmd_frame[2];
+        advert_path_t *found = NULL;
+
+        for(int i = 0; i < ADVERT_PATH_TABLE_SIZE; i++) {
+            if(advert_paths[i].recv_timestamp == 0) continue;
+            if(memcmp(advert_paths[i].pubkey_prefix, pub_key,
+                      sizeof(advert_paths[i].pubkey_prefix)) != 0) continue;
+
+            found = &advert_paths[i];
+            break;
+        }
+
+        if(found) {
+            int i = 0;
+            out_frame[i++] = RESP_CODE_ADVERT_PATH;
+            memcpy(&out_frame[i], &found->recv_timestamp, 4);  i += 4;
+            out_frame[i++] = found->path_len;
+            i += mesh::Packet::writePath(&out_frame[i], found->path, found->path_len);
+            write_frame(out_frame, i);
+        } else {
+            write_err(ERR_CODE_NOT_FOUND);   // nothing heard from them yet
+        }
+
+    } else if(cmd == CMD_SET_FLOOD_SCOPE_KEY && len >= 2) {
+        /* Scoping limits how far a flood travels. This node has none - it
+         * always floods unscoped, which is MeshCore's own default and the
+         * widest reach - so the key is accepted and has no effect. Refusing
+         * instead stops some apps part way through connecting. */
+        write_ok();
+
+    } else if(cmd == CMD_SET_DEFAULT_FLOOD_SCOPE) {
+        write_ok();
+
+    } else if(cmd == CMD_GET_DEFAULT_FLOOD_SCOPE) {
+        // A bare response code is how the protocol says "no scope set".
+        out_frame[0] = RESP_CODE_DEFAULT_FLOOD_SCOPE;
+        write_frame(out_frame, 1);
+
     } else if(cmd == CMD_GET_TUNING_PARAMS) {
         // The defaults MeshCore ships with; this node does not expose tuning.
         uint32_t rx_delay_base = 0, airtime_factor = 1000;
@@ -1007,6 +1069,32 @@ ContactInfo *companion_process_ack(BaseChatMesh *chat, const uint8_t *data)
         return ack_table[i].contact;
     }
     return NULL;
+}
+
+void companion_note_advert_path(const ContactInfo &contact, uint8_t path_len,
+                                const uint8_t *path)
+{
+    if(path == NULL || !mesh::Packet::isValidPathLen(path_len)) return;
+
+    advert_path_t *slot   = &advert_paths[0];
+    uint32_t       oldest = 0xFFFFFFFF;
+
+    for(int i = 0; i < ADVERT_PATH_TABLE_SIZE; i++) {
+        if(advert_paths[i].recv_timestamp != 0 &&
+           memcmp(advert_paths[i].pubkey_prefix, contact.id.pub_key,
+                  sizeof(advert_paths[i].pubkey_prefix)) == 0) {
+            slot = &advert_paths[i];   // already known, refresh it
+            break;
+        }
+        if(advert_paths[i].recv_timestamp < oldest) {
+            oldest = advert_paths[i].recv_timestamp;
+            slot   = &advert_paths[i];
+        }
+    }
+
+    memcpy(slot->pubkey_prefix, contact.id.pub_key, sizeof(slot->pubkey_prefix));
+    slot->path_len       = mesh::Packet::copyPath(slot->path, path, path_len);
+    slot->recv_timestamp = chat_mesh ? chat_mesh->getRTCClock()->getCurrentTime() : 1;
 }
 
 void companion_on_advert(const ContactInfo &contact, bool is_new)
