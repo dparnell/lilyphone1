@@ -209,6 +209,13 @@ call held to your ear is a call being hung up and dialled into by the side of
 your head. With *Ear Detect* on, the proximity sensor suppresses the touch panel
 while the phone is against a face during a call.
 
+**On the board this was written against the setting reads "No sensor".** The
+LTR-553ALS does not answer on the I2C bus at all - not cold, and not with its
+1.8V supply forced up - so there is nothing to read a face with. The feature is
+kept because it costs nothing when the sensor is absent and works the moment one
+answers, but on this hardware it does nothing, and the setting says so rather
+than offering a switch that cannot do anything.
+
 It is off by default, and deliberately narrow. It runs only while a call is
 connected, so a sensor stuck reporting "near" cannot lock the phone up. It
 suppresses touch only — the keyboard still works, so there is always a way to

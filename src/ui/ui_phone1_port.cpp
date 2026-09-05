@@ -447,6 +447,10 @@ void ui_settings_load(void)
     prox_enabled        = prefs.getBool("ear", prox_enabled);
     prefs.end();
 
+    // Remembered from a board that had the sensor, or from before it was known
+    // to be missing. Either way it cannot do anything here.
+    if(!ui_setting_ear_detect_available()) prox_enabled = false;
+
     if(autolock_choice < 0 ||
        autolock_choice >= (int)(sizeof(autolock_choices) / sizeof(autolock_choices[0]))) {
         autolock_choice = 0;
@@ -504,6 +508,29 @@ void ui_setting_set_ear_detect(bool on)
 
 bool ui_setting_get_ear_detect(void) { return prox_enabled; }
 
+bool ui_setting_ear_detect_available(void)
+{
+    return peri_init_st[E_PERI_LTR_553ALS];
+}
+
+/* Shown as a value rather than a switch, so the row can report that there is
+ * nothing to switch. On this board the LTR-553ALS does not answer at all -
+ * neither cold nor with its supply forced up - so the setting would otherwise
+ * be one that turns on and does nothing. */
+const char *ui_setting_ear_detect_text(void)
+{
+    if(!ui_setting_ear_detect_available()) return "No sensor";
+
+    return prox_enabled ? "On" : "Off";
+}
+
+void ui_setting_ear_detect_next(void)
+{
+    if(!ui_setting_ear_detect_available()) return;
+
+    ui_setting_set_ear_detect(!prox_enabled);
+}
+
 bool ui_touch_suppressed(void) { return prox_suppress; }
 
 /* Watching the sensor whenever the setting is on, rather than only during a
@@ -524,13 +551,14 @@ void ui_proximity_tick(void)
         return;
     }
 
-    if(!peri_init_st[E_PERI_LTR_553ALS]) {
+    if(!ui_setting_ear_detect_available()) {
         prox_suppress = false;
 
-        // Rarely, but not never: silence here was indistinguishable from the
-        // sensor working and seeing nothing.
-        if(millis() - prox_logged > 5000) {
-            prox_logged = millis();
+        // Once. A sensor that is not fitted will not become fitted, and saying
+        // so every few seconds for the life of the boot is just noise.
+        static bool warned = false;
+        if(!warned) {
+            warned = true;
             Serial.printf("[PROX] ear detect needs the light sensor, and %s\n",
                           LTR553_status());
         }

@@ -69,6 +69,11 @@ void ui_settings_load(void);
  * call, so a cheek cannot hang it up. Off by default. */
 void ui_setting_set_ear_detect(bool on);
 bool ui_setting_get_ear_detect(void);
+/* False when the proximity sensor did not start, in which case the setting is
+ * shown as unavailable rather than as a switch that does nothing. */
+bool ui_setting_ear_detect_available(void);
+const char *ui_setting_ear_detect_text(void);
+void ui_setting_ear_detect_next(void);
 
 /* Whether the touch panel should be ignored right now. Read by the input
  * driver, which is the one place that can act on it. */
