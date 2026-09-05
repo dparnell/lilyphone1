@@ -594,6 +594,11 @@ void setup() {
 
   boot_screen_finish();
 
+  /* Space held through boot keeps the companion link off for this run, without
+   * forgetting the setting. Checked before lvgl_init() because the display asks
+   * whether a link is coming up before deciding where to put its buffers. */
+  if(keypad_boot_key_held(' ')) mesh_companion_hold_off();
+
   lvgl_init();
 
   /* After the display has taken the memory it needs, so that what is left is

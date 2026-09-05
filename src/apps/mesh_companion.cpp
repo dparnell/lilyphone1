@@ -137,6 +137,7 @@ static BaseSerialInterface *active_link = NULL;
 
 static int  link_mode    = MESH_LINK_OFF;
 static int  link_wanted  = MESH_LINK_OFF;
+static bool link_held_off = false;  // by a key held at boot, for this boot only
 static bool ble_started  = false;   // BLEDevice::init() is a one-way door
 static bool wifi_started = false;
 
@@ -1187,10 +1188,19 @@ void companion_queue_channel_msg(int channel_idx, mesh::Packet *pkt,
 }
 
 //************************************[ public API ]****************************
+void mesh_companion_hold_off(void)
+{
+    link_held_off = true;
+    link_set_detail("held off at boot - turn it on to start it");
+
+    Serial.println("[LINK] a key was held at boot, so the companion link stays off");
+}
+
 bool mesh_companion_link_saved(void)
 {
-    // No node to drive means no reason to spend the memory on a link.
-    return chat_mesh != NULL && link_wanted != MESH_LINK_OFF;
+    // No node to drive, or told not to this time, means no reason to spend the
+    // memory on a link - including the display's fast drawing buffer.
+    return chat_mesh != NULL && link_wanted != MESH_LINK_OFF && !link_held_off;
 }
 
 void mesh_companion_boot(void)
@@ -1218,7 +1228,8 @@ void mesh_companion_set_link(int want)
 {
     if(want < MESH_LINK_OFF || want > MESH_LINK_WIFI) return;
 
-    link_wanted = want;
+    link_wanted   = want;
+    link_held_off = false;   // asked for by hand, so the boot-time veto lapses
     companion_save();
 
     /* Starting either radio blocks for a while and wants far more stack than

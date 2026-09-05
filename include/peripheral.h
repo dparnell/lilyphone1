@@ -34,6 +34,9 @@ enum {
 #define KEYPAD_RELEASE 0
 
 bool keypad_init(int address);
+/* Whether this key was already held down as the keypad started, which is how
+ * a key held through boot can change what the firmware does. */
+bool keypad_boot_key_held(char c);
 void keypad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data);
 
 // gyro

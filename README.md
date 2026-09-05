@@ -163,6 +163,13 @@ It also means turning the link on cannot take effect immediately: the buffer was
 placed at startup and the memory is already spent. The setting is saved and the
 screen says *restart the phone to start the link*, which is exactly what to do.
 
+**Hold the space key while the phone starts to keep the link off for that boot.**
+The setting is not forgotten - turn it on again from the screen and it starts,
+and the next ordinary boot brings it back as usual. This is the manual
+counterpart to the crash latch below, for a link that is misbehaving badly
+enough to matter without being bad enough to crash. The Companion app screen
+says *held off at boot* so it is clear why nothing is running.
+
 The link is remembered and comes back on its own at boot, which is when there is
 the most memory free for it. That also means a link which cannot start would
 otherwise make the phone unusable — it would fail, restart, and fail again with

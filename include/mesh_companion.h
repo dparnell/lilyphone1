@@ -47,6 +47,14 @@ const char *mesh_companion_link_name(void);
  * than always on. */
 bool mesh_companion_link_saved(void);
 
+/* Keeps the link off for this boot without forgetting the setting. A way back
+ * in when the link itself is what is making the phone unusable - the manual
+ * counterpart to the crash latch, for the times when a fault is not bad enough
+ * to trip it but is bad enough to matter. Must be called before the display
+ * places its buffers, since that decision depends on whether a link is coming
+ * up. */
+void mesh_companion_hold_off(void);
+
 /* Starts the remembered link. Called once during startup, after the display has
  * taken the memory it needs, so that what is left is what the radio gets. */
 void mesh_companion_boot(void);

@@ -50,7 +50,49 @@ bool sym = false;
 #define K_RIGHT_SHIFT 30
 
 
-Adafruit_TCA8418 keypad; 
+Adafruit_TCA8418 keypad;
+
+/* Keys already held down when the matrix scanner started.
+ *
+ * A key that is down while the keypad is configured is reported as a press in
+ * the FIFO, and keypad_init() flushes the FIFO before handing the keyboard to
+ * LVGL - so whatever was held has to be noticed before that or it is lost. This
+ * is what lets a key held through boot mean something.
+ */
+#define BOOT_KEYS_MAX 4
+static char boot_keys[BOOT_KEYS_MAX];
+static int  boot_key_count = 0;
+
+static void keypad_capture_boot_keys(void)
+{
+    // Long enough for the scanner to sweep the matrix and report what is down.
+    delay(40);
+
+    while(keypad.available() > 0 && boot_key_count < BOOT_KEYS_MAX) {
+        int k = keypad.getEvent();
+        if(k < KEYPAD_PRESS_VAL_MIN || k > KEYPAD_PRESS_VAL_MAX) continue;
+
+        k -= KEYPAD_PRESS_VAL_MIN;
+
+        int  row = k / KEYPAD_COLS;
+        int  col = (KEYPAD_COLS - 1) - k % KEYPAD_COLS;
+        char c   = keymap[row][col];
+
+        if(c) boot_keys[boot_key_count++] = c;
+    }
+
+    // Printed even when nothing was held: a count of zero while a key is being
+    // held is the one thing that would say this does not work on this keypad.
+    Serial.printf("[KEYPAD] %d key(s) held at boot\n", boot_key_count);
+}
+
+bool keypad_boot_key_held(char c)
+{
+    for(int i = 0; i < boot_key_count; i++) {
+        if(boot_keys[i] == c) return true;
+    }
+    return false;
+}
 
 bool keypad_init(int address)
 {
@@ -71,6 +113,8 @@ bool keypad_init(int address)
     keypad.matrix(KEYPAD_ROWS, KEYPAD_COLS);
 
     // flush the internal buffer
+    keypad_capture_boot_keys();   // before the flush throws the evidence away
+
     keypad.flush();
 
     return true;
