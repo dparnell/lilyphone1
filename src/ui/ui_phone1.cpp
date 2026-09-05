@@ -841,20 +841,10 @@ static void scr1_1_advertise_event(lv_event_t *e)
     mesh_net_advertise();
 }
 
-static lv_obj_t *scr1_1_region = NULL;
-
-static void scr1_1_region_event(lv_event_t *e)
+static void scr1_1_radio_event(lv_event_t *e)
 {
     LV_UNUSED(e);
-
-    mesh_net_region_next();
-
-    lv_obj_t *label = lv_obj_get_child(scr1_1_region, 0);
-    if(label) {
-        lv_label_set_text_fmt(label, "%s  %.3f", mesh_net_region_name(),
-                              mesh_net_region_freq());
-    }
-    ui_disp_full_refr();
+    scr_mgr_push(SCREEN1_2_ID, false);
 }
 
 static void create1_1(lv_obj_t *parent)
@@ -877,10 +867,12 @@ static void create1_1(lv_obj_t *parent)
 
     lv_obj_t *bar = scr_action_bar_create(parent, 124);
 
-    char region[48];
-    lv_snprintf(region, sizeof(region), "%s  %.3f", mesh_net_region_name(),
-                mesh_net_region_freq());
-    scr1_1_region = scr_bar_btn_create(bar, region, 190, scr1_1_region_event, NULL);
+    char radio[56];
+    mesh_radio_t r;
+    mesh_net_get_radio(&r);
+    lv_snprintf(radio, sizeof(radio), LV_SYMBOL_SETTINGS "  %s  %.3f",
+                mesh_net_region_name(), r.freq_mhz);
+    scr_bar_btn_create(bar, radio, 190, scr1_1_radio_event, NULL);
 
     scr_bar_btn_create(bar, LV_SYMBOL_UPLOAD "  Announce now", 190, scr1_1_advertise_event, NULL);
     scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr1_1_save_event, NULL);
@@ -901,8 +893,7 @@ static void exit1_1(void) {
 
 static void destroy1_1(void)
 {
-    scr1_1_name   = NULL;
-    scr1_1_region = NULL;
+    scr1_1_name = NULL;
 }
 
 static scr_lifecycle_t screen1_1 = {
@@ -910,6 +901,232 @@ static scr_lifecycle_t screen1_1 = {
     .entry = entry1_1,
     .exit  = exit1_1,
     .destroy = destroy1_1,
+};
+#endif
+// --------------------- screen 1.2 --------------------- mesh radio settings
+#if 1
+/* The four numbers every node on a mesh has to agree on. Presets cover the
+ * published regional settings; editing any one of them switches to the custom
+ * preset, seeded from whatever was showing, since someone who changes a value
+ * by hand is no longer on a published set. */
+enum {
+    SCR1_2_FREQ = 0,
+    SCR1_2_BW,
+    SCR1_2_SF,
+    SCR1_2_CR,
+    SCR1_2_FIELD_MAX,
+};
+
+static int       scr1_2_editing = SCR1_2_FREQ;
+static lv_obj_t *scr1_2_list    = NULL;
+
+static void scr1_2_populate(void);
+
+static const struct {
+    const char *name;
+    const char *unit;
+} scr1_2_fields[SCR1_2_FIELD_MAX] = {
+    { "Frequency",        "MHz" },
+    { "Bandwidth",        "kHz" },
+    { "Spreading factor", ""    },
+    { "Coding rate",      ""    },
+};
+
+static void scr1_2_field_value(int field, char *buf, int len)
+{
+    mesh_radio_t r;
+    mesh_net_get_radio(&r);
+
+    switch(field) {
+        case SCR1_2_FREQ: lv_snprintf(buf, len, "%.3f", r.freq_mhz); break;
+        case SCR1_2_BW:   lv_snprintf(buf, len, "%.1f", r.bandwidth_khz); break;
+        case SCR1_2_SF:   lv_snprintf(buf, len, "%d", r.spreading_factor); break;
+        case SCR1_2_CR:   lv_snprintf(buf, len, "%d", r.coding_rate); break;
+        default:          buf[0] = '\0'; break;
+    }
+}
+
+static void scr1_2_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr1_2_field_event(lv_event_t *e)
+{
+    scr1_2_editing = (int)(intptr_t)lv_event_get_user_data(e);
+    scr_mgr_push(SCREEN1_3_ID, false);
+}
+
+static void scr1_2_preset_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    mesh_net_region_next();
+    scr1_2_populate();
+    ui_disp_full_refr();
+}
+
+static void scr1_2_populate(void)
+{
+    char value[32];
+
+    lv_obj_clean(scr1_2_list);
+
+    scr_row_create(scr1_2_list, "Preset", mesh_net_region_name(), NULL,
+                   scr1_2_preset_event, NULL);
+
+    for(int i = 0; i < SCR1_2_FIELD_MAX; i++) {
+        char shown[40];
+        scr1_2_field_value(i, value, sizeof(value));
+        lv_snprintf(shown, sizeof(shown), "%s %s", value, scr1_2_fields[i].unit);
+
+        scr_row_create(scr1_2_list, scr1_2_fields[i].name, shown, NULL,
+                       scr1_2_field_event, (void *)(intptr_t)i);
+    }
+}
+
+static void create1_2(lv_obj_t *parent)
+{
+    lv_obj_t *note = lv_label_create(parent);
+    lv_obj_set_width(note, lv_pct(94));
+    lv_obj_set_style_text_font(note, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(note, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(note, "All four must match the other nodes exactly.");
+    lv_obj_align(note, LV_ALIGN_TOP_MID, 0, 34);
+
+    scr1_2_list = scr_app_list_create(parent);
+    lv_obj_set_size(scr1_2_list, lv_pct(96), LV_VER_RES - 60);
+    lv_obj_align(scr1_2_list, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    scr1_2_populate();
+
+    scr_back_btn_create(parent, "Mesh radio", scr1_2_back_event);
+}
+
+static void entry1_2(void)
+{
+    scr1_2_populate();
+    ui_disp_full_refr();
+}
+
+static void exit1_2(void) { ui_disp_full_refr(); }
+
+static void destroy1_2(void) { scr1_2_list = NULL; }
+
+static scr_lifecycle_t screen1_2 = {
+    .create = create1_2,
+    .entry = entry1_2,
+    .exit  = exit1_2,
+    .destroy = destroy1_2,
+};
+#endif
+// --------------------- screen 1.3 --------------------- one radio value
+#if 1
+static lv_obj_t *scr1_3_field = NULL;
+
+static void scr1_3_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr1_3_save_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    mesh_radio_t r;
+    mesh_net_get_radio(&r);
+
+    const char *text = lv_textarea_get_text(scr1_3_field);
+    if(text == NULL || text[0] == '\0') return;
+
+    float value = atof(text);
+
+    switch(scr1_2_editing) {
+        case SCR1_2_FREQ: r.freq_mhz         = value; break;
+        case SCR1_2_BW:   r.bandwidth_khz    = value; break;
+        case SCR1_2_SF:   r.spreading_factor = (uint8_t)value; break;
+        case SCR1_2_CR:   r.coding_rate      = (uint8_t)value; break;
+        default: return;
+    }
+
+    // Anything typed by hand is by definition no longer a published preset.
+    mesh_net_set_custom(r.freq_mhz, r.bandwidth_khz, r.spreading_factor, r.coding_rate);
+    scr_mgr_pop(false);
+}
+
+static const char *scr1_3_keypad_map[] = { "1", "2", "3", "\n",
+                                           "4", "5", "6", "\n",
+                                           "7", "8", "9", "\n",
+                                           ".", "0", LV_SYMBOL_BACKSPACE, ""
+                                         };
+
+static void scr1_3_keypad_event(lv_event_t *e)
+{
+    lv_obj_t   *btnm = (lv_obj_t *)lv_event_get_target(e);
+    const char *txt  = lv_btnmatrix_get_btn_text(btnm, lv_btnmatrix_get_selected_btn(btnm));
+
+    if(txt == NULL) return;
+
+    if(strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) lv_textarea_del_char(scr1_3_field);
+    else                                      lv_textarea_add_text(scr1_3_field, txt);
+}
+
+static void create1_3(lv_obj_t *parent)
+{
+    char value[32];
+    scr1_2_field_value(scr1_2_editing, value, sizeof(value));
+
+    scr1_3_field = scr_field_create(parent, scr1_2_fields[scr1_2_editing].name, 38,
+                                    value, 12);
+
+    lv_obj_t *hint = lv_label_create(parent);
+    lv_obj_set_width(hint, lv_pct(92));
+    lv_obj_set_style_text_font(hint, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(hint, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 92);
+
+    switch(scr1_2_editing) {
+        case SCR1_2_FREQ:
+            lv_label_set_text(hint, "In MHz, for example 916.575. Transmitting where you are "
+                                    "not licensed to is on you, not the radio."); break;
+        case SCR1_2_BW:
+            lv_label_set_text(hint, "In kHz. Narrow meshes usually run 62.5, wider ones 250."); break;
+        case SCR1_2_SF:
+            lv_label_set_text(hint, "5 to 12. Lower is faster and shorter ranged."); break;
+        default:
+            lv_label_set_text(hint, "5 to 8."); break;
+    }
+
+    lv_obj_t *pad = lv_btnmatrix_create(parent);
+    lv_btnmatrix_set_map(pad, scr1_3_keypad_map);
+    lv_obj_set_size(pad, lv_pct(96), 112);
+    lv_obj_set_style_border_width(pad, 0, LV_PART_MAIN);
+    lv_obj_align(pad, LV_ALIGN_BOTTOM_MID, 0, -48);
+    lv_obj_add_event_cb(pad, scr1_3_keypad_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr1_3_save_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr1_3_back_event, NULL);
+
+    scr_back_btn_create(parent, scr1_2_fields[scr1_2_editing].name, scr1_3_back_event);
+}
+
+static void entry1_3(void)
+{
+    lv_group_focus_obj(scr1_3_field);
+    ui_disp_full_refr();
+}
+
+static void exit1_3(void) { ui_disp_full_refr(); }
+
+static void destroy1_3(void) { scr1_3_field = NULL; }
+
+static scr_lifecycle_t screen1_3 = {
+    .create = create1_3,
+    .entry = entry1_3,
+    .exit  = exit1_3,
+    .destroy = destroy1_3,
 };
 #endif
 //************************************[ screen 2 ]****************************************** Setting
@@ -5117,6 +5334,8 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN0_ID,    &screen0);      // menu
     scr_mgr_register(SCREEN1_ID,    &screen1);      // Mesh
     scr_mgr_register(SCREEN1_1_ID,  &screen1_1);    //  - this node
+    scr_mgr_register(SCREEN1_2_ID,  &screen1_2);    //  - radio settings
+    scr_mgr_register(SCREEN1_3_ID,  &screen1_3);    //     - one value
     scr_mgr_register(SCREEN2_ID,    &screen2);      // Setting
     scr_mgr_register(SCREEN2_1_ID,  &screen2_1);    //  - Time
     scr_mgr_register(SCREEN2_1_1_ID,&screen2_1_1);  //     - time zone picker

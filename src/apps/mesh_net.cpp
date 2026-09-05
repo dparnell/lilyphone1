@@ -46,26 +46,31 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
  * bandwidth with a lower spreading factor - so if nothing is ever heard on the
  * right frequency, that is the next thing to check against whoever else is out
  * there. */
-#define MESH_BANDWIDTH    250.0f
-#define MESH_SPREADING    10
-#define MESH_CODING_RATE  5
 #define MESH_TX_POWER_DBM 22
 
-/* Only the frequency varies by region; bandwidth, spreading factor and coding
- * rate are common across all of them. */
-static const struct {
-    const char *name;
-    float       freq_mhz;
-} mesh_regions[] = {
-    { "Aus / NZ",     915.800f },
-    { "EU / UK",      869.525f },
-    { "US / Canada",  910.525f },
+/* The presets. The wide ones are what the MeshCore community publishes per
+ * region; the narrow one is what the mesh in Victoria actually runs, and the
+ * difference is not only the frequency - bandwidth, spreading factor and coding
+ * rate all differ, and all four have to match to hear anything. Several meshes
+ * have moved to narrow settings like these. */
+static const mesh_radio_t mesh_presets[] = {
+    { "Victoria AU", 916.575f, 62.5f,  7, 8 },
+    { "Aus / NZ",    915.800f, 250.0f, 10, 5 },
+    { "EU / UK",     869.525f, 250.0f, 10, 5 },
+    { "US / Canada", 910.525f, 250.0f, 10, 5 },
 };
 
-#define MESH_REGION_COUNT ((int)(sizeof(mesh_regions) / sizeof(mesh_regions[0])))
+#define MESH_PRESET_COUNT  ((int)(sizeof(mesh_presets) / sizeof(mesh_presets[0])))
+// One past the presets is the custom entry.
+#define MESH_REGION_CUSTOM MESH_PRESET_COUNT
+#define MESH_REGION_COUNT  (MESH_PRESET_COUNT + 1)
 
-static int  region_idx     = 0;   // Aus / NZ, which is where this phone lives
+static int  region_idx     = 0;   // Victoria, which is where this phone lives
 static bool region_pending = false;
+
+/* Only meaningful while the custom entry is selected, but kept regardless so
+ * that stepping away from it and back does not lose what was typed. */
+static mesh_radio_t custom_radio = { "Custom", 916.575f, 62.5f, 7, 8 };
 
 // How often this node announces itself unprompted.
 #define MESH_ADVERT_PERIOD_MS (10 * 60 * 1000)
@@ -203,10 +208,14 @@ static void identity_load(mesh::LocalIdentity &self)
 static void region_save(void)
 {
     Preferences prefs;
-    if(prefs.begin(MESH_PREFS_NAMESPACE, false)) {
-        prefs.putInt("region", region_idx);
-        prefs.end();
-    }
+    if(!prefs.begin(MESH_PREFS_NAMESPACE, false)) return;
+
+    prefs.putInt("region", region_idx);
+    prefs.putFloat("freq", custom_radio.freq_mhz);
+    prefs.putFloat("bw", custom_radio.bandwidth_khz);
+    prefs.putUChar("sf", custom_radio.spreading_factor);
+    prefs.putUChar("cr", custom_radio.coding_rate);
+    prefs.end();
 }
 
 static void region_load(void)
@@ -215,32 +224,71 @@ static void region_load(void)
     if(!prefs.begin(MESH_PREFS_NAMESPACE, true)) return;
 
     region_idx = prefs.getInt("region", region_idx);
+    custom_radio.freq_mhz         = prefs.getFloat("freq", custom_radio.freq_mhz);
+    custom_radio.bandwidth_khz    = prefs.getFloat("bw", custom_radio.bandwidth_khz);
+    custom_radio.spreading_factor = prefs.getUChar("sf", custom_radio.spreading_factor);
+    custom_radio.coding_rate      = prefs.getUChar("cr", custom_radio.coding_rate);
     prefs.end();
 
     if(region_idx < 0 || region_idx >= MESH_REGION_COUNT) region_idx = 0;
 }
 
-const char *mesh_net_region_name(void)
+void mesh_net_get_radio(mesh_radio_t *out)
 {
-    return mesh_regions[region_idx].name;
+    if(out == NULL) return;
+    *out = (region_idx == MESH_REGION_CUSTOM) ? custom_radio : mesh_presets[region_idx];
 }
 
-float mesh_net_region_freq(void)
+const char *mesh_net_region_name(void)
 {
-    return mesh_regions[region_idx].freq_mhz;
+    return (region_idx == MESH_REGION_CUSTOM) ? custom_radio.name
+                                              : mesh_presets[region_idx].name;
+}
+
+bool mesh_net_region_is_custom(void)
+{
+    return region_idx == MESH_REGION_CUSTOM;
+}
+
+/* Applies whatever is now selected. Retuning touches the radio and the mesh
+ * task is in the middle of using it, so this leaves a note rather than reaching
+ * in from the UI task. */
+static void region_apply(void)
+{
+    mesh_radio_t r;
+    mesh_net_get_radio(&r);
+
+    region_save();
+    region_pending = true;
+
+    Serial.printf("[MESH] %s: %.3fMHz bw%.1f sf%d cr%d\n",
+                  mesh_net_region_name(), r.freq_mhz, r.bandwidth_khz,
+                  r.spreading_factor, r.coding_rate);
 }
 
 void mesh_net_region_next(void)
 {
     region_idx = (region_idx + 1) % MESH_REGION_COUNT;
-    region_save();
+    region_apply();
+}
 
-    /* Retuning touches the radio, and the mesh task is in the middle of using
-     * it, so leave it a note rather than reaching in from the UI task. */
-    region_pending = true;
+void mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
+                         uint8_t spreading_factor, uint8_t coding_rate)
+{
+    // Bounds are the radio's own limits, not anything to do with what is legal
+    // to transmit on - that part is the operator's business.
+    if(freq_mhz < 137.0f || freq_mhz > 1020.0f) return;
+    if(bandwidth_khz < 7.8f || bandwidth_khz > 500.0f) return;
+    if(spreading_factor < 5 || spreading_factor > 12) return;
+    if(coding_rate < 5 || coding_rate > 8) return;
 
-    Serial.printf("[MESH] region %s, %.3fMHz\n",
-                  mesh_net_region_name(), mesh_net_region_freq());
+    custom_radio.freq_mhz         = freq_mhz;
+    custom_radio.bandwidth_khz    = bandwidth_khz;
+    custom_radio.spreading_factor = spreading_factor;
+    custom_radio.coding_rate      = coding_rate;
+
+    region_idx = MESH_REGION_CUSTOM;
+    region_apply();
 }
 
 //************************************[ task ]**********************************
@@ -250,10 +298,13 @@ static void mesh_task(void *param)
 
     for(;;) {
         if(region_pending) {
+            mesh_radio_t r;
+            mesh_net_get_radio(&r);
+
             region_pending = false;
-            radio_driver.setParams(mesh_net_region_freq(), MESH_BANDWIDTH,
-                                   MESH_SPREADING, MESH_CODING_RATE);
-            // Say hello on the new frequency; nobody there has heard this node.
+            radio_driver.setParams(r.freq_mhz, r.bandwidth_khz,
+                                   r.spreading_factor, r.coding_rate);
+            // Say hello on the new settings; nobody there has heard this node.
             mesh_net_advertise();
         }
 
@@ -295,15 +346,16 @@ bool mesh_net_init(void)
 
     radio_driver.begin();
     the_mesh->begin();
-    radio_driver.setParams(mesh_net_region_freq(), MESH_BANDWIDTH,
-                           MESH_SPREADING, MESH_CODING_RATE);
+    mesh_radio_t r;
+    mesh_net_get_radio(&r);
+    radio_driver.setParams(r.freq_mhz, r.bandwidth_khz, r.spreading_factor, r.coding_rate);
     radio.setOutputPower(MESH_TX_POWER_DBM);
 
     char key[16];
     mesh_net_get_self_key(key, sizeof(key));
-    Serial.printf("[MESH] up as \"%s\" (%s), %s on %.3fMHz sf%d bw%.1f\n",
-                  self_name, key, mesh_net_region_name(), mesh_net_region_freq(),
-                  MESH_SPREADING, MESH_BANDWIDTH);
+    Serial.printf("[MESH] up as \"%s\" (%s), %s: %.3fMHz bw%.1f sf%d cr%d\n",
+                  self_name, key, mesh_net_region_name(), r.freq_mhz,
+                  r.bandwidth_khz, r.spreading_factor, r.coding_rate);
 
     mesh_running = true;
     xTaskCreate(mesh_task, "mesh", 1024 * 8, NULL, 6, &mesh_task_h);

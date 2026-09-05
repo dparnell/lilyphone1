@@ -29,7 +29,8 @@ enum {
     SCREEN0_ID = 0, // menu
     SCREEN1_ID,
     SCREEN1_1_ID,
-    SCREEN1_2_ID,
+    SCREEN1_2_ID,  // mesh radio settings
+    SCREEN1_3_ID,  // one radio value at a time
     SCREEN2_ID,    // config
     SCREEN2_1_ID,  // time
     SCREEN2_1_1_ID,// time zone picker

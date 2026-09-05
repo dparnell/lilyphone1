@@ -48,13 +48,29 @@ void mesh_net_set_self_name(const char *name);
 /* Sends an advertisement now rather than waiting for the next one. */
 void mesh_net_advertise(void);
 
-/* The regulatory region, which is what picks the frequency. Stepped through a
- * short list rather than typed, since only a few are legal anywhere and the
- * exact numbers matter - a node on the wrong one hears nothing at all, which
- * looks identical to a radio that never started. Persisted. */
+/* The radio settings, which every node on a mesh has to agree on exactly: get
+ * any one of the four wrong and nothing is heard at all, which looks identical
+ * to a radio that never started.
+ *
+ * They come as named presets, since a local mesh usually publishes a set, plus
+ * a custom entry for one that does not match any of them. All persisted. */
+typedef struct {
+    const char *name;
+    float       freq_mhz;
+    float       bandwidth_khz;
+    uint8_t     spreading_factor;
+    uint8_t     coding_rate;
+} mesh_radio_t;
+
+/* The settings actually in force, whether from a preset or set by hand. */
+void        mesh_net_get_radio(mesh_radio_t *out);
 const char *mesh_net_region_name(void);
-float       mesh_net_region_freq(void);
 void        mesh_net_region_next(void);
+bool        mesh_net_region_is_custom(void);
+
+/* Sets all four by hand, which selects the custom preset. Retunes the radio. */
+void        mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
+                                uint8_t spreading_factor, uint8_t coding_rate);
 
 int  mesh_net_node_count(void);
 /* Copies out one heard node, newest first. False when `idx` is past the end. */
