@@ -523,7 +523,14 @@ void setup() {
       Serial.printf("[0x%02X] %s\n", address, name);
   }
 
-  Serial.printf("%d device%s answered\n", nDevices, nDevices == 1 ? "" : "s");
+  /* The count comes with a caveat worth printing, because the touch panel is
+   * always missing from this list and always works: the scan runs before
+   * touch.setPins() releases its reset, and a part held in reset does not
+   * acknowledge. Absence here is only evidence about parts that are powered and
+   * out of reset by now. */
+  Serial.printf("%d device%s answered; parts still held in reset do not appear,\n"
+                "which is why the touch panel is not among them\n",
+                nDevices, nDevices == 1 ? "" : "s");
 
   Serial.printf(" ------------- SPIFFS ------------- \n");
 
