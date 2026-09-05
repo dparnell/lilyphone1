@@ -43,6 +43,15 @@ void keypad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data);
 bool BHI260AP_init(void);
 void BHI260AP_get_val(int val_type, float *x, float *y, float *z);
 
+/* Whether this board has a magnetometer wired to the sensor hub. It is an
+ * external part on the hub's secondary bus, so nothing but the hub can say. */
+bool BHI260AP_has_compass(void);
+
+/* Heading, pitch and roll in degrees, from the hub's own fusion of all three
+ * sensors - already corrected for tilt and for the iron around it. False when
+ * there is no magnetometer, in which case there is no heading to be had. */
+bool BHI260AP_get_heading(float *heading, float *pitch, float *roll);
+
 // LTR553
 bool LTR553_init(void);
 /* Why it is not available, for whatever asks after the boot log has scrolled. */
