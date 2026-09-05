@@ -16,9 +16,12 @@
  * adverts nodes send anyway, so an app that reconnects after a restart will
  * re-add whatever it has that this node has not heard yet.
  *
- * Everything in this file runs on the mesh task. MeshCore is not thread-safe,
- * and the UI must not reach any of it - the UI's part is choosing the link and
- * reading the status, which is what mesh_companion.h exposes.
+ * Everything that touches MeshCore runs on the mesh task, because MeshCore is
+ * not thread-safe and the UI must not reach any of it - the UI's part is
+ * choosing the link and reading the status, which is what mesh_companion.h
+ * exposes. The one exception is bringing a link up or down, which happens on a
+ * task of its own: it blocks for a long time and goes far deeper into the stack
+ * than the mesh task has to give.
  *
  * Frames are handed to a BaseSerialInterface, which is where the two link
  * variants differ and the only place they do: Bluetooth is a GATT service whose
@@ -128,7 +131,6 @@ static BaseSerialInterface *active_link = NULL;
 
 static int  link_mode    = MESH_LINK_OFF;
 static int  link_wanted  = MESH_LINK_OFF;
-static bool link_pending = false;
 static bool ble_started  = false;   // BLEDevice::init() is a one-way door
 static bool wifi_started = false;
 
@@ -295,12 +297,47 @@ static void companion_save(void)
     prefs.end();
 }
 
+/* The crash latch.
+ *
+ * The link is remembered and comes back on its own at boot, which is what makes
+ * it useful - and also what would make a link that cannot start into a device
+ * that cannot be used: it would fail, restart, and fail again with nobody able
+ * to reach the setting that turns it off.
+ *
+ * So the attempt is written down before it is made and rubbed out once the link
+ * has been up and stable for a while. Finding it still written at boot means
+ * the last attempt did not survive, and the link is left off with an
+ * explanation rather than tried again.
+ */
+#define LINK_SETTLE_MS 20000   // up this long before an attempt counts as good
+
+static void latch_set(int mode)
+{
+    Preferences prefs;
+    if(!prefs.begin(MESH_PREFS_NAMESPACE, false)) return;
+
+    prefs.putUChar("linktry", (uint8_t)mode);
+    prefs.end();   // committed here, which is the point - the crash comes next
+}
+
+static void latch_clear(void)
+{
+    Preferences prefs;
+    if(!prefs.begin(MESH_PREFS_NAMESPACE, false)) return;
+
+    prefs.putUChar("linktry", (uint8_t)MESH_LINK_OFF);
+    prefs.end();
+}
+
 static void companion_load(void)
 {
+    int latched = MESH_LINK_OFF;
+
     Preferences prefs;
     if(prefs.begin(MESH_PREFS_NAMESPACE, true)) {
         link_wanted = prefs.getInt("link", MESH_LINK_OFF);
         ble_pin     = prefs.getUInt("blepin", 0);
+        latched     = prefs.getUChar("linktry", MESH_LINK_OFF);
         prefs.getString("apssid", ap_ssid, sizeof(ap_ssid));
         prefs.getString("appass", ap_pass, sizeof(ap_pass));
         prefs.end();
@@ -308,6 +345,14 @@ static void companion_load(void)
 
     if(link_wanted < MESH_LINK_OFF || link_wanted > MESH_LINK_WIFI) link_wanted = MESH_LINK_OFF;
     if(ap_ssid[0] == '\0') snprintf(ap_ssid, sizeof(ap_ssid), "lilyphone1-mesh");
+
+    if(latched != MESH_LINK_OFF) {
+        Serial.println("[LINK] the last attempt to start the link did not survive; left off");
+        link_set_detail("last attempt crashed - turn it on again to retry");
+        link_wanted = MESH_LINK_OFF;
+        latch_clear();
+        companion_save();
+    }
 
     /* The pairing code is generated once and then kept. A code that changed on
      * every boot would unpair the phone every time the battery went flat. */
@@ -318,10 +363,27 @@ static void companion_load(void)
 }
 
 //************************************[ link control ]*************************
+/* How much internal RAM each radio needs to have a chance of starting. These
+ * are not the stacks' documented requirements - there are none - but enough
+ * headroom that a failure is a real failure rather than this device having
+ * already spent the memory on the display and the modem. Refusing with a number
+ * beats aborting inside the Bluetooth stack, which is what happens otherwise. */
+#define BLE_MIN_INTERNAL_FREE   64000
+#define WIFI_MIN_INTERNAL_FREE  48000
+
+static TaskHandle_t  link_task_h   = NULL;
+static volatile bool link_changing = false;
+static bool          link_latched  = false;
+static unsigned long link_up_since = 0;
+
 static void link_stop(void)
 {
-    if(active_link) active_link->disable();
+    // Cleared before anything is torn down, so the mesh task cannot be part way
+    // through a frame on a link that is being taken apart underneath it.
+    BaseSerialInterface *going = active_link;
     active_link = NULL;
+
+    if(going) going->disable();
 
     if(wifi_started) {
         WiFi.softAPdisconnect(true);
@@ -339,11 +401,23 @@ static void link_start_ble(void)
 
     if(!ble_started) {
         /* The Bluetooth stack wants tens of kilobytes of internal RAM, and the
-         * display's draw buffer has already taken a large bite of it, so say
-         * how much is left before asking - a failure here is otherwise hard to
-         * account for. */
+         * display's draw buffer and the modem have already taken a large bite
+         * of it. Checked rather than attempted, because the stack aborts on its
+         * way up rather than returning a failure. */
+        size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         Serial.printf("[LINK] %u bytes of internal RAM free before bluetooth starts\n",
-                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                      (unsigned)internal_free);
+
+        if(internal_free < BLE_MIN_INTERNAL_FREE) {
+            char why[64];
+            snprintf(why, sizeof(why), "not enough memory (%uK free)",
+                     (unsigned)(internal_free / 1024));
+            link_set_detail(why);
+            link_mode = MESH_LINK_OFF;
+            Serial.printf("[LINK] bluetooth needs about %uK free; not starting\n",
+                          (unsigned)(BLE_MIN_INTERNAL_FREE / 1024));
+            return;
+        }
 
         char name[MESH_NET_NAME_LEN];
         mesh_net_get_self_name(name, sizeof(name));
@@ -358,8 +432,9 @@ static void link_start_ble(void)
     }
 
     ble_link->enable();
-    active_link = ble_link;
-    link_mode = MESH_LINK_BLE;
+    link_mode     = MESH_LINK_BLE;
+    link_up_since = millis();
+    active_link   = ble_link;
 
     char name[MESH_NET_NAME_LEN];
     mesh_net_get_self_name(name, sizeof(name));
@@ -380,10 +455,20 @@ static void link_start_wifi(void)
 
     if(wifi_link == NULL) wifi_link = new SerialWifiInterface();
 
-    bool open_network = strlen(ap_pass) < 8;
+    bool   open_network  = strlen(ap_pass) < 8;
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 
     Serial.printf("[LINK] %u bytes of internal RAM free before the wifi radio starts\n",
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                  (unsigned)internal_free);
+
+    if(internal_free < WIFI_MIN_INTERNAL_FREE) {
+        char why[64];
+        snprintf(why, sizeof(why), "not enough memory (%uK free)",
+                 (unsigned)(internal_free / 1024));
+        link_set_detail(why);
+        link_mode = MESH_LINK_OFF;
+        return;
+    }
 
     WiFi.mode(WIFI_AP);
     if(!WiFi.softAP(ap_ssid, open_network ? NULL : ap_pass)) {
@@ -395,8 +480,9 @@ static void link_start_wifi(void)
 
     wifi_link->begin(MESH_LINK_PORT);
     wifi_link->enable();
-    active_link = wifi_link;
-    link_mode = MESH_LINK_WIFI;
+    link_mode     = MESH_LINK_WIFI;
+    link_up_since = millis();
+    active_link   = wifi_link;
 
     snprintf(link_address, sizeof(link_address), "%s:%d",
              WiFi.softAPIP().toString().c_str(), MESH_LINK_PORT);
@@ -408,15 +494,64 @@ static void link_start_wifi(void)
 
 static void link_apply(void)
 {
-    link_pending = false;
-
     if(link_wanted == link_mode) return;
 
     link_stop();
 
-    if(link_wanted == MESH_LINK_BLE)       link_start_ble();
-    else if(link_wanted == MESH_LINK_WIFI) link_start_wifi();
-    else                                   Serial.println("[LINK] off");
+    if(link_wanted == MESH_LINK_OFF) {
+        Serial.println("[LINK] off");
+        if(link_latched) {
+            latch_clear();
+            link_latched = false;
+        }
+        return;
+    }
+
+    // Written down before the attempt, so that a boot which does not come back
+    // leaves evidence of what was being tried. Rubbed out by companion_service()
+    // once the link has been up long enough to call it good.
+    latch_set(link_wanted);
+    link_latched = true;
+
+    if(link_wanted == MESH_LINK_BLE) link_start_ble();
+    else                             link_start_wifi();
+
+    if(link_mode == MESH_LINK_OFF) {
+        // Refused rather than crashed, so there is nothing to warn about later.
+        latch_clear();
+        link_latched = false;
+    }
+}
+
+/* Bringing either radio up is slow and goes far deeper into the stack than the
+ * mesh task has to give - BLEDevice::init() alone is more than its eight
+ * kilobytes - and it must not stall the radio while it happens. So a change of
+ * link gets a task of its own, with room to work, which exists for the length
+ * of the change and then goes away.
+ *
+ * This runs at boot as well as on a change: the link is a remembered setting
+ * and comes back on its own, which is also when there is the most internal
+ * memory free for it. */
+static void link_task(void *param)
+{
+    (void)param;
+
+    link_apply();
+
+    link_changing = false;
+    link_task_h   = NULL;
+    vTaskDelete(NULL);
+}
+
+static void link_request(void)
+{
+    if(link_changing) return;
+
+    link_changing = true;
+    if(xTaskCreate(link_task, "link", 1024 * 12, NULL, 4, &link_task_h) != pdPASS) {
+        link_changing = false;
+        link_set_detail("no room to start the link");
+    }
 }
 
 //************************************[ commands ]******************************
@@ -791,13 +926,25 @@ void companion_attach(BaseChatMesh *chat)
     memset(ack_table, 0, sizeof(ack_table));
     companion_load();
 
-    link_pending = true;   // applied on the mesh task's next pass
+    // The remembered link comes back on its own, here at boot, where there is
+    // more internal memory free than there will be at any later point.
+    link_request();
 }
 
 void companion_service(void)
 {
-    if(link_pending) link_apply();
+    // Nothing may touch the link while it is being taken down or brought up.
+    if(link_changing) return;
+
     if(active_link == NULL) return;
+
+    /* The link has been up long enough to call the attempt good, so the note
+     * saying it was being tried can go - otherwise the next boot would think
+     * this one had crashed. */
+    if(link_latched && millis() - link_up_since > LINK_SETTLE_MS) {
+        latch_clear();
+        link_latched = false;
+    }
 
     active_link->loop();
 
@@ -936,11 +1083,11 @@ void mesh_companion_set_link(int want)
     link_wanted = want;
     companion_save();
 
-    /* Starting either radio blocks for a while and, for Bluetooth, has to
-     * happen where nothing else is using the mesh - so this is a note for the
-     * mesh task rather than something done from the UI. */
+    /* Starting either radio blocks for a while and wants far more stack than
+     * the UI task can spare, so the change is handed to a task of its own
+     * rather than done here. */
     link_set_detail("starting");
-    link_pending = true;
+    link_request();
 }
 
 bool mesh_companion_is_connected(void)
@@ -980,8 +1127,12 @@ void mesh_companion_set_wifi(const char *ssid, const char *pass)
 
     companion_save();
 
-    // A running access point keeps the name it started with.
-    if(link_mode == MESH_LINK_WIFI) link_pending = true;
+    /* A running access point keeps the name it started with, so it is put back
+     * up under the new one. */
+    if(link_mode == MESH_LINK_WIFI) {
+        link_mode = MESH_LINK_OFF;   // so link_apply() sees a change to make
+        link_request();
+    }
 }
 
 void mesh_companion_get_address(char *buf, int len)

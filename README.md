@@ -138,6 +138,17 @@ interface.
 One link at a time, and turning Bluetooth off only stops it advertising: the
 Bluetooth stack keeps the memory it claimed until the next restart.
 
+The link is remembered and comes back on its own at boot, which is when there is
+the most memory free for it. That also means a link which cannot start would
+otherwise make the phone unusable — it would fail, restart, and fail again with
+nobody able to reach the setting that turns it off. So the attempt is written
+down before it is made and rubbed out once the link has been up for twenty
+seconds. Finding it still written at boot means the last attempt did not
+survive, and the link is left off with *last attempt crashed — turn it on again
+to retry* on the Companion app screen. Starting a radio is also refused outright,
+with the number of kilobytes free, when there is plainly not enough memory left
+for it.
+
 Messages that arrive while no app is connected are held — sixteen of them — and
 handed over when one connects, so a conversation is not lost because the phone
 was in somebody's pocket. Contacts are not persisted: they are rebuilt from the
