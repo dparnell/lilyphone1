@@ -378,6 +378,7 @@ static lv_obj_t * menu_taskbar_battery_percent = NULL;
 static lv_obj_t * menu_taskbar_wifi = NULL;
 static lv_obj_t * menu_taskbar_signal = NULL;
 static lv_obj_t * menu_taskbar_unread = NULL;
+static lv_obj_t * menu_taskbar_companion = NULL;
 
 static int page_num = 0;
 static int page_curr = 0;
@@ -536,6 +537,13 @@ static void create0(lv_obj_t *parent)
     lv_label_set_text_fmt(menu_taskbar_unread, "%s", LV_SYMBOL_ENVELOPE);
     lv_obj_add_flag(menu_taskbar_unread, LV_OBJ_FLAG_HIDDEN);
 
+    /* And a mark that a companion app is driving the mesh, since from here that
+     * is invisible - the phone in your pocket is doing the talking. Drawn as
+     * whichever link it came in over, so it says how as well as whether. */
+    menu_taskbar_companion = lv_label_create(status_parent);
+    lv_label_set_text_fmt(menu_taskbar_companion, "%s", LV_SYMBOL_BLUETOOTH);
+    lv_obj_add_flag(menu_taskbar_companion, LV_OBJ_FLAG_HIDDEN);
+
     menu_taskbar_signal = lv_label_create(status_parent);
     lv_label_set_text_fmt(menu_taskbar_signal, "%s", LV_SYMBOL_CALL);
     lv_obj_add_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
@@ -553,6 +561,23 @@ static void create0(lv_obj_t *parent)
 
     if(taskbar_statue[TASKBAR_ID_CHARGE])
         lv_obj_clear_flag(menu_taskbar_charge, LV_OBJ_FLAG_HIDDEN);
+
+    /* The icons are created hidden, but the state they reflect outlived the
+     * last time this screen existed - and the refresh only acts on a *change*,
+     * so anything already true when the menu is rebuilt would stay invisible
+     * until it happened to change again. */
+    if(taskbar_statue[TASKBAR_ID_UNREAD])
+        lv_obj_clear_flag(menu_taskbar_unread, LV_OBJ_FLAG_HIDDEN);
+
+    if(taskbar_statue[TASKBAR_ID_SIGNAL])
+        lv_obj_clear_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
+
+    if(taskbar_statue[TASKBAR_ID_COMPANION]) {
+        lv_label_set_text(menu_taskbar_companion,
+                          mesh_companion_get_link() == MESH_LINK_WIFI ? LV_SYMBOL_WIFI
+                                                                     : LV_SYMBOL_BLUETOOTH);
+        lv_obj_clear_flag(menu_taskbar_companion, LV_OBJ_FLAG_HIDDEN);
+    }
 
     menu_taskbar_battery = lv_label_create(status_parent);
     
@@ -5178,10 +5203,19 @@ static void scr15_render(void)
         if(pos > (int)sizeof(pending) - 1) pos = (int)sizeof(pending) - 1;
     }
 
-    int mesh_unread = mesh_net_unread_total();
-    if(mesh_unread > 0) {
-        lv_snprintf(pending + pos, sizeof(pending) - pos, "\n\n%s %d on the mesh",
-                    LV_SYMBOL_ENVELOPE, mesh_unread);
+    /* With a companion app attached, the mesh is being read on a phone - so
+     * what is worth knowing from here is that the link is up, not a count of
+     * messages somebody else has already seen. */
+    if(mesh_companion_is_connected()) {
+        lv_snprintf(pending + pos, sizeof(pending) - pos, "\n\n%s Companion app",
+                    mesh_companion_get_link() == MESH_LINK_WIFI ? LV_SYMBOL_WIFI
+                                                                : LV_SYMBOL_BLUETOOTH);
+    } else {
+        int mesh_unread = mesh_net_unread_total();
+        if(mesh_unread > 0) {
+            lv_snprintf(pending + pos, sizeof(pending) - pos, "\n\n%s %d on the mesh",
+                        LV_SYMBOL_ENVELOPE, mesh_unread);
+        }
     }
 
     lv_snprintf(detail, sizeof(detail), "%s%s\n\n%s %d%%",
@@ -5204,7 +5238,10 @@ static void scr15_timer_event(lv_timer_t *t)
     struct tm tm_now;
     localtime_r(&now, &tm_now);
 
-    int unread = sms_unread_total() + mesh_net_unread_total();
+    /* The link coming up or going down changes what is shown as surely as a
+     * message arriving does, so it counts as a change worth repainting for. */
+    int unread = sms_unread_total() + mesh_net_unread_total()
+               + (mesh_companion_is_connected() ? 100000 : 0);
     if(tm_now.tm_min == shown_minute && unread == shown_unread) return;
 
     shown_minute = tm_now.tm_min;
@@ -5799,9 +5836,14 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
         taskbar_statue[TASKBAR_ID_SIGNAL] = registered;
     }
 
-    // Either radio: what the badge means is that something is waiting to be
-    // read, not which way it arrived.
-    uint16_t unread = sms_unread_total() + mesh_net_unread_total();
+    /* A companion app has the mesh, so its messages are being read on a phone
+     * and counting them here would be counting somebody else's post. Texts are
+     * still this device's own business either way. */
+    bool companion = mesh_companion_is_connected();
+
+    uint16_t unread = sms_unread_total();
+    if(!companion) unread += mesh_net_unread_total();
+
     if(taskbar_statue[TASKBAR_ID_UNREAD] != unread)
     {
         if(unread > 0) {
@@ -5810,6 +5852,19 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
             lv_obj_add_flag(menu_taskbar_unread, LV_OBJ_FLAG_HIDDEN);
         }
         taskbar_statue[TASKBAR_ID_UNREAD] = unread;
+    }
+
+    if(taskbar_statue[TASKBAR_ID_COMPANION] != (uint16_t)companion)
+    {
+        if(companion) {
+            lv_label_set_text(menu_taskbar_companion,
+                              mesh_companion_get_link() == MESH_LINK_WIFI ? LV_SYMBOL_WIFI
+                                                                          : LV_SYMBOL_BLUETOOTH);
+            lv_obj_clear_flag(menu_taskbar_companion, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(menu_taskbar_companion, LV_OBJ_FLAG_HIDDEN);
+        }
+        taskbar_statue[TASKBAR_ID_COMPANION] = companion;
     }
 
     charge = ui_battery_27220_get_input();

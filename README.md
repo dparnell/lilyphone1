@@ -174,6 +174,12 @@ to retry* on the Companion app screen. Starting a radio is also refused outright
 with the number of kilobytes free, when there is plainly not enough memory left
 for it.
 
+While an app is connected, the taskbar shows the link it came in over —
+Bluetooth or WiFi — and the lock screen says *Companion app* where it would
+otherwise count unread mesh messages. Those messages are being read on a phone,
+so counting them here would be counting somebody else's post; unread texts still
+raise the envelope either way, since those remain this device's own business.
+
 Messages that arrive while no app is connected are held — sixteen of them — and
 handed over when one connects, so a conversation is not lost because the phone
 was in somebody's pocket. Contacts are not persisted: they are rebuilt from the
