@@ -415,12 +415,20 @@ static void send_service(void)
     if(to_channel) {
         /* Nobody acknowledges a channel message - it is a broadcast to whoever
          * is listening - so getting it onto the air is the whole outcome. */
-        bool ok = public_channel != NULL &&
-                  the_mesh->sendGroupMessage(the_mesh->getRTCClock()->getCurrentTimeUnique(),
-                                             public_channel->channel, self_name,
-                                             text, strlen(text));
+        if(public_channel == NULL) {
+            Serial.println("[MESH] no public channel to send on");
+            msg_settle(MESH_ST_FAILED);
+            return;
+        }
+
+        uint32_t stamp = the_mesh->getRTCClock()->getCurrentTimeUnique();
+        bool ok = the_mesh->sendGroupMessage(stamp, public_channel->channel, self_name,
+                                            text, strlen(text));
         if(ok) packets_tx++;
         msg_settle(ok ? MESH_ST_OK : MESH_ST_FAILED);
+
+        Serial.printf("[MESH] channel %s: \"%s: %s\" stamped %u\n",
+                      ok ? "send queued" : "SEND FAILED", self_name, text, (unsigned)stamp);
         return;
     }
 
@@ -573,6 +581,39 @@ void mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
     region_apply();
 }
 
+//************************************[ the clock ]*****************************
+/* Keeping the mesh's clock in step with the phone's.
+ *
+ * Every message this node sends carries a timestamp, and that is the time the
+ * receiving node shows to whoever is reading. MeshCore's own clock only counts
+ * up from a fixed date built into it, so it needs telling.
+ *
+ * Seeding it once at startup is not enough, and was the bug: the phone does not
+ * know the time that early - it arrives later from the cellular network or a
+ * GPS fix - so the mesh clock stayed at its built-in date and everything sent
+ * from here was stamped two years in the past. It still travelled, but it
+ * landed at the wrong end of everybody's conversation, which looks exactly like
+ * a message that never arrived. */
+static void clock_service(void)
+{
+    static uint32_t next_check = 0;
+
+    if(millis() < next_check) return;
+    next_check = millis() + 30000;
+
+    time_t now = time(NULL);
+    if(now < 1700000000) return;   // the phone does not know either, yet
+
+    uint32_t mesh_now = rtc_clock.getCurrentTime();
+    int32_t  drift    = (int32_t)((uint32_t)now - mesh_now);
+
+    if(drift > -60 && drift < 60) return;
+
+    rtc_clock.setCurrentTime((uint32_t)now);
+    Serial.printf("[MESH] clock set from the phone: %u, was %u (%d seconds out)\n",
+                  (unsigned)now, (unsigned)mesh_now, (int)drift);
+}
+
 //************************************[ task ]**********************************
 static void mesh_task(void *param)
 {
@@ -595,6 +636,7 @@ static void mesh_task(void *param)
             radio.setOutputPower(tx_power_dbm);
         }
 
+        clock_service();
         send_service();
         companion_service();
         the_mesh->loop();
@@ -651,7 +693,14 @@ bool mesh_net_init(void)
     the_mesh->begin();
 
     public_channel = the_mesh->addChannel(MESH_PUBLIC_NAME, MESH_PUBLIC_PSK);
-    if(public_channel == NULL) Serial.println("[MESH] the public channel would not open");
+    if(public_channel == NULL) {
+        Serial.println("[MESH] the public channel would not open");
+    } else {
+        // The hash is what other nodes match against, so it is the one number
+        // worth comparing when channel traffic is not getting through.
+        Serial.printf("[MESH] public channel open, hash %02X%02X\n",
+                      public_channel->channel.hash[0], public_channel->channel.hash[1]);
+    }
 
     mesh_radio_t r;
     mesh_net_get_radio(&r);
@@ -772,13 +821,25 @@ bool mesh_net_send_busy(void)
 
 bool mesh_net_send_text(const uint8_t peer[4], const char *text)
 {
-    if(!mesh_running || the_mesh == NULL) return false;
-    if(text == NULL || text[0] == '\0' || strlen(text) >= MESH_TEXT_LEN) return false;
-    if(peer == NULL && public_channel == NULL) return false;
+    if(!mesh_running || the_mesh == NULL) {
+        Serial.println("[MESH] send refused: the radio is not running");
+        return false;
+    }
+    if(text == NULL || text[0] == '\0' || strlen(text) >= MESH_TEXT_LEN) {
+        Serial.println("[MESH] send refused: nothing to send, or too long");
+        return false;
+    }
+    if(peer == NULL && public_channel == NULL) {
+        Serial.println("[MESH] send refused: the public channel is not open");
+        return false;
+    }
 
     /* Only one at a time: an acknowledgement says which packet arrived, not
      * which message, so a second in flight could not be told from the first. */
-    if(mesh_net_send_busy()) return false;
+    if(mesh_net_send_busy()) {
+        Serial.println("[MESH] send refused: the last one is still in flight");
+        return false;
+    }
 
     // Logged before it is queued, so it is on screen the moment the composer
     // closes rather than after the radio has had its turn.

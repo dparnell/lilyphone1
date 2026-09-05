@@ -136,6 +136,8 @@ The modem is the only route to a speaker, via `modem_play_tone()` (`AT+CPTONE`).
 
 The node is a `BaseChatMesh` subclass. **MeshCore is not thread-safe and the UI never calls into it**: `mesh_net.cpp` mirrors the node list and the message log into its own tables under one mutex (`node_lock`, which guards both), and the LVGL task reads only those. A send is a note left in `send_pending` for `send_service()` to pick up on the mesh task. `mesh_net_revision()` is bumped on every change so a screen can decide whether a redraw — hundreds of milliseconds on this panel — is warranted.
 
+**MeshCore has its own clock and it has to be told the time more than once.** `VolatileRTCClock` counts up from a date compiled into it, and every message this node sends carries that timestamp — which is the time the *receiving* node shows its user. Seeding it in `mesh_net_init()` does nothing, because the phone's own clock is not set that early: it arrives later from NITZ or a GPS fix. `clock_service()` in the mesh task therefore re-checks every 30 seconds and corrects drift over a minute. Without it everything sent from here is stamped two years in the past — it still travels, but it lands at the wrong end of the recipient's conversation, which is indistinguishable from never arriving.
+
 Two consequences of how MeshCore acknowledges messages:
 
 - **An ACK names a packet hash, not a message.** `processAck()` matches it against the one `pending_ack` it is waiting on, and `msg_settle()` applies the outcome to the newest still-sending entry in the log. Only one message may be in flight at a time (`mesh_net_send_busy()`), or the two could not be told apart.
