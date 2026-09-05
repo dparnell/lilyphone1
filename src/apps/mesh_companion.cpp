@@ -567,6 +567,8 @@ static void handle_frame(int len)
     frames_rx++;
     cmd_frame[len] = 0;   // so a trailing text field can be read as a string
 
+    Serial.printf("[LINK] cmd %d, %d bytes\n", (int)cmd, len);
+
     if(chat_mesh == NULL) {
         write_err(ERR_CODE_BAD_STATE);
         return;
@@ -574,6 +576,8 @@ static void handle_frame(int len)
 
     if(cmd == CMD_DEVICE_QUERY && len >= 2) {
         app_target_ver = cmd_frame[1];
+        Serial.printf("[LINK] the app speaks protocol version %d; this node reports %d\n",
+                      (int)app_target_ver, FIRMWARE_VER_CODE);
 
         int i = 0;
         out_frame[i++] = RESP_CODE_DEVICE_INFO;
@@ -919,6 +923,10 @@ static void handle_frame(int len)
         esp_restart();
 
     } else {
+        /* Worth seeing rather than swallowing: what an app asks for and does
+         * not get is the list of what to implement next, and a command refused
+         * here is the most likely reason a function in the app does nothing. */
+        Serial.printf("[LINK] command %d is not implemented; refused\n", (int)cmd);
         write_err(ERR_CODE_UNSUPPORTED_CMD);
     }
 }

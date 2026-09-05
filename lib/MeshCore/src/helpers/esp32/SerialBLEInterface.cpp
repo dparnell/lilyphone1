@@ -95,6 +95,21 @@ void SerialBLEInterface::onConnect(BLEServer* pServer) {
 void SerialBLEInterface::onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t *param) {
   BLE_DEBUG_PRINTLN("onConnect(), conn_id=%d, mtu=%d", param->connect.conn_id, pServer->getPeerMTU(param->connect.conn_id));
   last_conn_id = param->connect.conn_id;
+
+  /* LOCAL CHANGE (lilyphone1), not upstream.
+   *
+   * Upstream sets this only in onAuthenticationComplete(). That callback fires
+   * when a phone pairs, but not necessarily when an already-bonded phone comes
+   * back: the link is encrypted from the stored key without a fresh pairing, so
+   * there is no authentication to complete. With the flag left false, writes
+   * out are dropped while writes in are still queued - the app connects, sends
+   * commands, and never hears a word back.
+   *
+   * Dropping the flag as the gate costs nothing, because it was never what
+   * enforced security: both characteristics carry ESP_GATT_PERM_*_ENC_MITM, so
+   * the GATT layer refuses an unauthenticated peer before any of this is
+   * reached. */
+  deviceConnected = true;
 }
 
 void SerialBLEInterface::onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
