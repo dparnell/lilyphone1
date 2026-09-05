@@ -48,6 +48,14 @@ void mesh_net_set_self_name(const char *name);
 /* Sends an advertisement now rather than waiting for the next one. */
 void mesh_net_advertise(void);
 
+/* The regulatory region, which is what picks the frequency. Stepped through a
+ * short list rather than typed, since only a few are legal anywhere and the
+ * exact numbers matter - a node on the wrong one hears nothing at all, which
+ * looks identical to a radio that never started. Persisted. */
+const char *mesh_net_region_name(void);
+float       mesh_net_region_freq(void);
+void        mesh_net_region_next(void);
+
 int  mesh_net_node_count(void);
 /* Copies out one heard node, newest first. False when `idx` is past the end. */
 bool mesh_net_get_node(int idx, mesh_node_t *out);

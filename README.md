@@ -74,7 +74,12 @@ Two things to know before relying on it:
 
 **Mesh.** The phone is a [MeshCore](https://docs.meshcore.io/) node. It carries
 its own Ed25519 identity, announces itself on the LoRa network, and lists the
-nodes it hears with their signal and hop count. Messaging over the mesh is not
+nodes it hears with their signal and hop count. The regulatory region is
+settable and picks the frequency with it — Aus/NZ 915.800, EU/UK 869.525,
+US/Canada 910.525 MHz, all at 250 kHz bandwidth, SF10, CR5. Only nodes on the
+same settings are heard, and some local meshes have since moved to "narrow"
+settings (62.5 kHz, lower spreading factor), so that is worth checking against
+whoever else is nearby if nothing ever appears. Messaging over the mesh is not
 wired up yet - this layer establishes the radio, the crypto and the protocol.
 The node listens and speaks for itself but does not relay for others, since a
 phone in a pocket makes a poor repeater and forwarding costs battery.

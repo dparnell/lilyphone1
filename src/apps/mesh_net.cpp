@@ -38,13 +38,34 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
 
 #define MESH_PREFS_NAMESPACE "mesh"
 
-/* The public MeshCore settings for this region. Anyone the phone is meant to
- * talk to has to be using the same ones. */
-#define MESH_FREQ_MHZ     915.0f
+/* The public MeshCore settings. Anyone this phone is meant to talk to has to be
+ * using the same ones, so these are the values the MeshCore community publishes
+ * rather than anything chosen here.
+ *
+ * Note that some local meshes have since moved to "narrow" settings - 62.5kHz
+ * bandwidth with a lower spreading factor - so if nothing is ever heard on the
+ * right frequency, that is the next thing to check against whoever else is out
+ * there. */
 #define MESH_BANDWIDTH    250.0f
 #define MESH_SPREADING    10
 #define MESH_CODING_RATE  5
 #define MESH_TX_POWER_DBM 22
+
+/* Only the frequency varies by region; bandwidth, spreading factor and coding
+ * rate are common across all of them. */
+static const struct {
+    const char *name;
+    float       freq_mhz;
+} mesh_regions[] = {
+    { "Aus / NZ",     915.800f },
+    { "EU / UK",      869.525f },
+    { "US / Canada",  910.525f },
+};
+
+#define MESH_REGION_COUNT ((int)(sizeof(mesh_regions) / sizeof(mesh_regions[0])))
+
+static int  region_idx     = 0;   // Aus / NZ, which is where this phone lives
+static bool region_pending = false;
 
 // How often this node announces itself unprompted.
 #define MESH_ADVERT_PERIOD_MS (10 * 60 * 1000)
@@ -178,12 +199,64 @@ static void identity_load(mesh::LocalIdentity &self)
     Serial.println("[MESH] new identity generated");
 }
 
+//************************************[ region ]********************************
+static void region_save(void)
+{
+    Preferences prefs;
+    if(prefs.begin(MESH_PREFS_NAMESPACE, false)) {
+        prefs.putInt("region", region_idx);
+        prefs.end();
+    }
+}
+
+static void region_load(void)
+{
+    Preferences prefs;
+    if(!prefs.begin(MESH_PREFS_NAMESPACE, true)) return;
+
+    region_idx = prefs.getInt("region", region_idx);
+    prefs.end();
+
+    if(region_idx < 0 || region_idx >= MESH_REGION_COUNT) region_idx = 0;
+}
+
+const char *mesh_net_region_name(void)
+{
+    return mesh_regions[region_idx].name;
+}
+
+float mesh_net_region_freq(void)
+{
+    return mesh_regions[region_idx].freq_mhz;
+}
+
+void mesh_net_region_next(void)
+{
+    region_idx = (region_idx + 1) % MESH_REGION_COUNT;
+    region_save();
+
+    /* Retuning touches the radio, and the mesh task is in the middle of using
+     * it, so leave it a note rather than reaching in from the UI task. */
+    region_pending = true;
+
+    Serial.printf("[MESH] region %s, %.3fMHz\n",
+                  mesh_net_region_name(), mesh_net_region_freq());
+}
+
 //************************************[ task ]**********************************
 static void mesh_task(void *param)
 {
     uint32_t next_advert = 0;
 
     for(;;) {
+        if(region_pending) {
+            region_pending = false;
+            radio_driver.setParams(mesh_net_region_freq(), MESH_BANDWIDTH,
+                                   MESH_SPREADING, MESH_CODING_RATE);
+            // Say hello on the new frequency; nobody there has heard this node.
+            mesh_net_advertise();
+        }
+
         the_mesh->loop();
 
         if(millis() > next_advert) {
@@ -214,19 +287,23 @@ bool mesh_net_init(void)
     packet_mgr = new StaticPoolPacketManager(16);
     the_mesh   = new PhoneMesh(radio_driver, ms_clock, rng, rtc_clock, *packet_mgr, tables);
 
+    region_load();
+
     mesh::LocalIdentity self;
     identity_load(self);
     the_mesh->self_id = self;
 
     radio_driver.begin();
     the_mesh->begin();
-    radio_driver.setParams(MESH_FREQ_MHZ, MESH_BANDWIDTH, MESH_SPREADING, MESH_CODING_RATE);
+    radio_driver.setParams(mesh_net_region_freq(), MESH_BANDWIDTH,
+                           MESH_SPREADING, MESH_CODING_RATE);
     radio.setOutputPower(MESH_TX_POWER_DBM);
 
     char key[16];
     mesh_net_get_self_key(key, sizeof(key));
-    Serial.printf("[MESH] up as \"%s\" (%s) on %.1fMHz sf%d\n",
-                  self_name, key, MESH_FREQ_MHZ, MESH_SPREADING);
+    Serial.printf("[MESH] up as \"%s\" (%s), %s on %.3fMHz sf%d bw%.1f\n",
+                  self_name, key, mesh_net_region_name(), mesh_net_region_freq(),
+                  MESH_SPREADING, MESH_BANDWIDTH);
 
     mesh_running = true;
     xTaskCreate(mesh_task, "mesh", 1024 * 8, NULL, 6, &mesh_task_h);

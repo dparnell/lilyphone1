@@ -841,6 +841,22 @@ static void scr1_1_advertise_event(lv_event_t *e)
     mesh_net_advertise();
 }
 
+static lv_obj_t *scr1_1_region = NULL;
+
+static void scr1_1_region_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    mesh_net_region_next();
+
+    lv_obj_t *label = lv_obj_get_child(scr1_1_region, 0);
+    if(label) {
+        lv_label_set_text_fmt(label, "%s  %.3f", mesh_net_region_name(),
+                              mesh_net_region_freq());
+    }
+    ui_disp_full_refr();
+}
+
 static void create1_1(lv_obj_t *parent)
 {
     char name[MESH_NET_NAME_LEN];
@@ -856,15 +872,19 @@ static void create1_1(lv_obj_t *parent)
     lv_obj_set_style_text_font(info, FONT_BOLD_SIZE_15, LV_PART_MAIN);
     lv_obj_set_style_text_color(info, DECKPRO_COLOR_FG, LV_PART_MAIN);
     lv_label_set_long_mode(info, LV_LABEL_LONG_WRAP);
-    lv_label_set_text_fmt(info,
-        "Key %s\n\nThis node listens and speaks for itself but does not relay for others.",
-        key);
-    lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 110);
+    lv_label_set_text_fmt(info, "Key %s\n\nOnly nodes on the same region are heard.", key);
+    lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 108);
 
-    lv_obj_t *bar = scr_action_bar_create(parent, 84);
+    lv_obj_t *bar = scr_action_bar_create(parent, 124);
+
+    char region[48];
+    lv_snprintf(region, sizeof(region), "%s  %.3f", mesh_net_region_name(),
+                mesh_net_region_freq());
+    scr1_1_region = scr_bar_btn_create(bar, region, 190, scr1_1_region_event, NULL);
+
+    scr_bar_btn_create(bar, LV_SYMBOL_UPLOAD "  Announce now", 190, scr1_1_advertise_event, NULL);
     scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr1_1_save_event, NULL);
     scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr1_1_btn_event_cb, NULL);
-    scr_bar_btn_create(bar, LV_SYMBOL_UPLOAD "  Announce now", 190, scr1_1_advertise_event, NULL);
 
     scr_back_btn_create(parent, "This node", scr1_1_btn_event_cb);
 }
@@ -881,7 +901,8 @@ static void exit1_1(void) {
 
 static void destroy1_1(void)
 {
-    scr1_1_name = NULL;
+    scr1_1_name   = NULL;
+    scr1_1_region = NULL;
 }
 
 static scr_lifecycle_t screen1_1 = {
