@@ -191,6 +191,19 @@ command" rather than going quiet. Everything a conversation needs is there —
 contacts, messages, channels, radio settings, device time, adverts — while
 custom variables, statistics, telemetry, signing and flood scoping are not.
 
+**Starting up.** Bringing this board up takes several seconds, most of it the
+modem, and the panel used to show one static word for the whole wait — which
+looks the same as a phone that has hung. The boot screen now draws a grid of the
+twelve systems being started, fills each icon in as it comes up, and names the
+one being waited on underneath. A system that never answers is left as an empty
+frame; one that failed is struck through. So a glance at the end of a boot says
+what is and is not working, which used to mean reading the serial log.
+
+It costs a little boot time — each repaint is an e-paper refresh — so repaints
+are rate limited: a run of fast steps collapses into one, while a slow step gets
+its own, which is where the information is actually wanted. The old splash was a
+full-screen refresh of its own, so this is close to free.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 
@@ -241,7 +254,7 @@ src/apps/             contacts and message storage, the clock, the zone table,
                       the MeshCore node and its companion protocol, the hotspot
                       relay
 src/assets/           fonts and icons, some generated
-tools/                the emoji font generator
+tools/                the emoji font and boot icon generators
 ```
 
 `CLAUDE.md` documents the architecture and the traps in more detail — the

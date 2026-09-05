@@ -14,6 +14,7 @@
 #include "udp_relay.h"
 #include "mesh_net.h"
 #include "mesh_companion.h"
+#include "boot_screen.h"
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 
@@ -49,7 +50,6 @@ static lv_timer_t *hibernate_timer    = NULL;
 static bool        panel_hibernating  = true;
 static volatile bool touch_is_down    = false; // set by touchpad_read
 static uint32_t    last_flush_ms      = 0;
-const char HelloWorld[] = "LilyPhone1";
 
 bool peri_init_st[E_PERI_NUM_MAX] = {0};
 
@@ -84,6 +84,10 @@ static void *disp_buf_alloc(size_t bytes, bool prefer_psram = false)
     return p;
 }
 
+/* Brings the panel up but draws nothing. The boot screen paints the first
+ * frame, a moment later and with something more useful on it - and a full
+ * window pass costs seconds on this display, so there is no sense spending one
+ * on a splash that is about to be replaced. */
 static bool ink_screen_init()
 {
     display.init(115200, true, 2, false);
@@ -91,21 +95,6 @@ static bool ink_screen_init()
     display.setFont(&FreeMonoBold9pt7b);
     if (display.epd2.WIDTH < 104) display.setFont(0);
     display.setTextColor(GxEPD_BLACK);
-    int16_t tbx, tby; uint16_t tbw, tbh;
-    display.getTextBounds(HelloWorld, 0, 0, &tbx, &tby, &tbw, &tbh);
-    // center bounding box by transposition of origin:
-    uint16_t x = ((display.width() - tbw) / 2) - tbx;
-    uint16_t y = ((display.height() - tbh) / 2) - tby;
-    display.setFullWindow();
-    display.firstPage();
-    do
-    {
-        display.fillScreen(GxEPD_WHITE);
-        display.setCursor(x, y);
-        display.print(HelloWorld);
-    }
-    while (display.nextPage());
-    display.hibernate();
     return true;
 }
 
@@ -538,24 +527,54 @@ void setup() {
   // init peripheral
   touch.setPins(BOARD_TOUCH_RST, BOARD_TOUCH_INT);
   peri_init_st[E_PERI_INK_SCREEN] = ink_screen_init();
-  peri_init_st[E_PERI_TOUCH]      = touch.begin(Wire, BOARD_I2C_ADDR_TOUCH, BOARD_TOUCH_SDA, BOARD_TOUCH_SCL);
-  peri_init_st[E_PERI_KYEPAD]     = keypad_init(BOARD_I2C_ADDR_KEYBOARD);
-  peri_init_st[E_PERI_BQ25896]    = bq25896_init();
-  peri_init_st[E_PERI_BQ27220]    = bq27220_init();
-  peri_init_st[E_PERI_SD]         = sd_care_init();
-  peri_init_st[E_PERI_GPS]        = gps_init();
-  peri_init_st[E_PERI_BHI260AP]   = BHI260AP_init();
-  peri_init_st[E_PERI_LTR_553ALS] = LTR553_init();
+
+  /* From here on the panel can say what is happening, which matters because
+   * what follows takes several seconds and the modem accounts for most of it.
+   * The display and the filesystem are already up by the time there is
+   * anywhere to report it. */
+  boot_screen_begin();
+  boot_screen_done(BOOT_DISPLAY, peri_init_st[E_PERI_INK_SCREEN]);
+  boot_screen_done(BOOT_STORAGE, true);
+
+  boot_screen_busy(BOOT_TOUCH);
+  peri_init_st[E_PERI_TOUCH]      = boot_screen_done(BOOT_TOUCH,
+      touch.begin(Wire, BOARD_I2C_ADDR_TOUCH, BOARD_TOUCH_SDA, BOARD_TOUCH_SCL));
+
+  boot_screen_busy(BOOT_KEYBOARD);
+  peri_init_st[E_PERI_KYEPAD]     = boot_screen_done(BOOT_KEYBOARD,
+      keypad_init(BOARD_I2C_ADDR_KEYBOARD));
+
+  boot_screen_busy(BOOT_CHARGER);
+  peri_init_st[E_PERI_BQ25896]    = boot_screen_done(BOOT_CHARGER, bq25896_init());
+
+  boot_screen_busy(BOOT_GAUGE);
+  peri_init_st[E_PERI_BQ27220]    = boot_screen_done(BOOT_GAUGE, bq27220_init());
+
+  boot_screen_busy(BOOT_SDCARD);
+  peri_init_st[E_PERI_SD]         = boot_screen_done(BOOT_SDCARD, sd_care_init());
+
+  boot_screen_busy(BOOT_GPS);
+  peri_init_st[E_PERI_GPS]        = boot_screen_done(BOOT_GPS, gps_init());
+
+  boot_screen_busy(BOOT_MOTION);
+  peri_init_st[E_PERI_BHI260AP]   = boot_screen_done(BOOT_MOTION, BHI260AP_init());
+
+  boot_screen_busy(BOOT_LIGHT);
+  peri_init_st[E_PERI_LTR_553ALS] = boot_screen_done(BOOT_LIGHT, LTR553_init());
   // Restore the chosen time zone before anything renders a clock.
   system_clock_init();
 
-  peri_init_st[E_PERI_A7682E]     = A7682E_init();
+  boot_screen_busy(BOOT_MODEM);
+  peri_init_st[E_PERI_A7682E]     = boot_screen_done(BOOT_MODEM, A7682E_init());
 
   phone_store_init();
   udp_relay_init();
 
   // After the SPI bus is up, and after the display: the mesh shares the bus.
-  peri_init_st[E_PERI_LORA] = mesh_net_init();
+  boot_screen_busy(BOOT_MESH);
+  peri_init_st[E_PERI_LORA] = boot_screen_done(BOOT_MESH, mesh_net_init());
+
+  boot_screen_finish();
 
   lvgl_init();
 
