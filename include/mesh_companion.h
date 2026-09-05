@@ -35,6 +35,20 @@ enum {
 int  mesh_companion_get_link(void);
 void mesh_companion_set_link(int link);
 
+/* Whether the link is set to come up, and the node is there for it to drive.
+ *
+ * Asked during startup, before the display buffers are allocated, because the
+ * answer decides where they go: the Bluetooth and WiFi stacks want more
+ * internal memory than is left once a full screen buffer has been taken out of
+ * it, so when the link is on, the drawing buffer goes to PSRAM instead. That
+ * costs some drawing speed and is the whole reason the link is a setting rather
+ * than always on. */
+bool mesh_companion_link_saved(void);
+
+/* Starts the remembered link. Called once during startup, after the display has
+ * taken the memory it needs, so that what is left is what the radio gets. */
+void mesh_companion_boot(void);
+
 /* Whether an app is connected right now. */
 bool mesh_companion_is_connected(void);
 

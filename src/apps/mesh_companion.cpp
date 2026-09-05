@@ -376,6 +376,21 @@ static volatile bool link_changing = false;
 static bool          link_latched  = false;
 static unsigned long link_up_since = 0;
 
+/* Refusing to start a radio, and saying the useful thing rather than the merely
+ * true one. There is enough memory for either radio at startup - the link is a
+ * remembered setting, and the display gives up its fast drawing buffer when it
+ * is on - but not once a full screen buffer has already been taken out of
+ * internal RAM. So the answer to being short now is a restart. */
+static void link_no_room(const char *what, size_t have, size_t want)
+{
+    link_set_detail("restart the phone to start the link");
+    link_mode = MESH_LINK_OFF;
+
+    Serial.printf("[LINK] %s wants about %uK of internal RAM and %uK is free; "
+                  "it will start on the next boot instead\n",
+                  what, (unsigned)(want / 1024), (unsigned)(have / 1024));
+}
+
 static void link_stop(void)
 {
     // Cleared before anything is torn down, so the mesh task cannot be part way
@@ -409,13 +424,7 @@ static void link_start_ble(void)
                       (unsigned)internal_free);
 
         if(internal_free < BLE_MIN_INTERNAL_FREE) {
-            char why[64];
-            snprintf(why, sizeof(why), "not enough memory (%uK free)",
-                     (unsigned)(internal_free / 1024));
-            link_set_detail(why);
-            link_mode = MESH_LINK_OFF;
-            Serial.printf("[LINK] bluetooth needs about %uK free; not starting\n",
-                          (unsigned)(BLE_MIN_INTERNAL_FREE / 1024));
+            link_no_room("bluetooth", internal_free, BLE_MIN_INTERNAL_FREE);
             return;
         }
 
@@ -462,11 +471,7 @@ static void link_start_wifi(void)
                   (unsigned)internal_free);
 
     if(internal_free < WIFI_MIN_INTERNAL_FREE) {
-        char why[64];
-        snprintf(why, sizeof(why), "not enough memory (%uK free)",
-                 (unsigned)(internal_free / 1024));
-        link_set_detail(why);
-        link_mode = MESH_LINK_OFF;
+        link_no_room("the wifi radio", internal_free, WIFI_MIN_INTERNAL_FREE);
         return;
     }
 
@@ -926,9 +931,10 @@ void companion_attach(BaseChatMesh *chat)
     memset(ack_table, 0, sizeof(ack_table));
     companion_load();
 
-    // The remembered link comes back on its own, here at boot, where there is
-    // more internal memory free than there will be at any later point.
-    link_request();
+    /* The link itself is not started here. Startup asks first (see
+     * mesh_companion_link_saved) so the display knows where to put its buffers,
+     * and starts it afterwards with mesh_companion_boot() - by which time what
+     * is left of internal memory is what the radio actually gets. */
 }
 
 void companion_service(void)
@@ -1071,6 +1077,19 @@ void companion_queue_channel_msg(int channel_idx, mesh::Packet *pkt,
 }
 
 //************************************[ public API ]****************************
+bool mesh_companion_link_saved(void)
+{
+    // No node to drive means no reason to spend the memory on a link.
+    return chat_mesh != NULL && link_wanted != MESH_LINK_OFF;
+}
+
+void mesh_companion_boot(void)
+{
+    if(!mesh_companion_link_saved()) return;
+
+    link_request();
+}
+
 int mesh_companion_get_link(void)
 {
     return link_wanted;

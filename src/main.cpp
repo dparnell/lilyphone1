@@ -13,6 +13,7 @@
 #include "system_clock.h"
 #include "udp_relay.h"
 #include "mesh_net.h"
+#include "mesh_companion.h"
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 
@@ -56,11 +57,23 @@ bool peri_init_st[E_PERI_NUM_MAX] = {0};
 /* Prefers internal RAM: LVGL renders pixel by pixel into the draw buffer and
  * GxEPD2 reads the packed one byte by byte, and PSRAM is several times slower
  * for that kind of access. Falls back to PSRAM rather than failing to boot. */
-static void *disp_buf_alloc(size_t bytes)
+static void *disp_buf_alloc(size_t bytes, bool prefer_psram = false)
 {
-    void *p = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    void *p = NULL;
+
+    /* Internal RAM by choice, because both of these are walked pixel by pixel
+     * over the whole screen on every update and PSRAM is several times slower
+     * at that. The exception is when the companion link is on: the Bluetooth
+     * and WiFi stacks want more internal memory than is left once a full screen
+     * buffer has been taken out of it, and a link that cannot start at all is
+     * worse than drawing that is not quite as quick. */
+    if(!prefer_psram) p = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
     if(p == NULL) {
-        Serial.printf("[DISP] %u bytes did not fit in internal RAM, using PSRAM\n", (unsigned)bytes);
+        if(!prefer_psram) {
+            Serial.printf("[DISP] %u bytes did not fit in internal RAM, using PSRAM\n",
+                          (unsigned)bytes);
+        }
         p = ps_malloc(bytes);
     }
     if(p) memset(p, 0, bytes);
@@ -280,11 +293,24 @@ static void lvgl_init(void)
     /* One buffer, not two: the panel push happens synchronously in the LVGL
      * task, so there is never a second frame being rendered alongside it and
      * the second buffer only cost memory. */
-    lv_color_t *buf_1 = (lv_color_t *)disp_buf_alloc(sizeof(lv_color_t) * DISP_BUF_SIZE);
+    /* The drawing buffer is by far the largest thing on this device that wants
+     * internal RAM - a byte per pixel of the whole screen - so it is what gives
+     * way when a companion link needs the room. */
+    bool link_wants_room = mesh_companion_link_saved();
+
+    lv_color_t *buf_1 = (lv_color_t *)disp_buf_alloc(sizeof(lv_color_t) * DISP_BUF_SIZE,
+                                                     link_wants_room);
     lv_disp_draw_buf_init(&draw_buf_dsc_1, buf_1, NULL, LCD_HOR_SIZE * LCD_VER_SIZE);
 
+    if(link_wants_room) {
+        Serial.println("[DISP] drawing buffer in PSRAM, to leave internal RAM for the "
+                       "companion link");
+    }
+
     // Packed 1bpp, so an eighth of the pixel count. The old size was the pixel
-    // count itself - eight times more than drawInvertedBitmap ever reads.
+    // count itself - eight times more than drawInvertedBitmap ever reads. Small
+    // enough to stay in internal RAM either way, and read byte by byte on every
+    // flush, so it is the last thing that should move.
     decodebuffer = (uint8_t *)disp_buf_alloc(DISP_BUF_SIZE / 8 + 64);
     // lv_disp_draw_buf_init(&draw_buf, lv_disp_buf_p, NULL, DISP_BUF_SIZE);
 
@@ -528,6 +554,11 @@ void setup() {
   peri_init_st[E_PERI_LORA] = mesh_net_init();
 
   lvgl_init();
+
+  /* After the display has taken the memory it needs, so that what is left is
+   * what the radio gets - and the link is what decides where the drawing buffer
+   * went, a few lines up. */
+  mesh_companion_boot();
 
   ui_phone1_entry();
 

@@ -138,6 +138,18 @@ interface.
 One link at a time, and turning Bluetooth off only stops it advertising: the
 Bluetooth stack keeps the memory it claimed until the next restart.
 
+**The link costs some drawing speed, and only while it is on.** Both radio
+stacks want more fast internal memory than is left once the display has taken a
+full screen buffer out of it — that buffer is a byte per pixel, the largest
+single claim on the device. So when the link is set to come up, the drawing
+buffer goes to the slower PSRAM instead and the radio gets the internal memory.
+Turn the link off and the buffer goes back where it was on the next restart.
+This is why the link is a setting rather than something always on.
+
+It also means turning the link on cannot take effect immediately: the buffer was
+placed at startup and the memory is already spent. The setting is saved and the
+screen says *restart the phone to start the link*, which is exactly what to do.
+
 The link is remembered and comes back on its own at boot, which is when there is
 the most memory free for it. That also means a link which cannot start would
 otherwise make the phone unusable — it would fail, restart, and fail again with
