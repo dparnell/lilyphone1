@@ -114,14 +114,6 @@ def icon_gps():
     return img
 
 
-def icon_motion():
-    img, d = new()
-    ring(d, (3, 3, 29, 29))                          # the gyroscope's gimbal
-    d.ellipse((3, 11, 29, 21), outline=1, width=WIDE)
-    d.ellipse((11, 3, 21, 29), outline=1, width=WIDE)
-    return img
-
-
 def icon_light():
     img, d = new()
     ring(d, (11, 11, 21, 21))
@@ -166,7 +158,6 @@ ICONS = [
     ("storage",  icon_storage),
     ("sdcard",   icon_sdcard),
     ("gps",      icon_gps),
-    ("motion",   icon_motion),
     ("light",    icon_light),
     ("modem",    icon_modem),
     ("mesh",     icon_mesh),

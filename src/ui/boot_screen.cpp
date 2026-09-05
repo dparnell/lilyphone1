@@ -14,8 +14,8 @@
  *
  * The cost of all this is e-paper refreshes, and they are not cheap: a partial
  * update of the whole panel is a few hundred milliseconds. Painting after every
- * one of twelve systems would add seconds to a boot in order to report on how
- * long the boot is taking. So repaints are rate limited - a run of fast steps
+ * system would add seconds to a boot in order to report on how long the boot is
+ * taking. So repaints are rate limited - a run of fast steps
  * collapses into one, while a slow step gets its own, which is exactly where
  * the information is wanted.
  */
@@ -33,7 +33,6 @@ extern GxEPD2_BW<GxEPD2_310_GDEQ031T10, GxEPD2_310_GDEQ031T10::HEIGHT> display;
 
 //************************************[ layout ]********************************
 #define BOOT_COLS      4
-#define BOOT_ROWS      3
 #define BOOT_CELL_W    (LCD_HOR_SIZE / BOOT_COLS)   // 60
 #define BOOT_CELL_H    64
 #define BOOT_GRID_TOP  46
@@ -56,7 +55,6 @@ static const struct {
     { boot_icon_gauge,    "Battery"  },
     { boot_icon_sdcard,   "SD card"  },
     { boot_icon_gps,      "GPS"      },
-    { boot_icon_motion,   "Motion"   },
     { boot_icon_light,    "Light"    },
     { boot_icon_modem,    "Modem"    },
     { boot_icon_mesh,     "Mesh"     },
@@ -82,10 +80,17 @@ static void draw_centred(const char *text, int16_t y)
 
 static void draw_cell(int idx)
 {
-    int col = idx % BOOT_COLS;
-    int row = idx / BOOT_COLS;
+    int col  = idx % BOOT_COLS;
+    int row  = idx / BOOT_COLS;
+    int rows = (BOOT_SYSTEM_MAX + BOOT_COLS - 1) / BOOT_COLS;
 
-    int16_t cx = col * BOOT_CELL_W + BOOT_CELL_W / 2;
+    /* A last row with fewer than four in it is centred rather than left ragged.
+     * An empty cell at the end of the grid would look like one of these boxes,
+     * and an empty box means a system that never started. */
+    int in_row = (row == rows - 1) ? (BOOT_SYSTEM_MAX - row * BOOT_COLS) : BOOT_COLS;
+    int16_t indent = (LCD_HOR_SIZE - in_row * BOOT_CELL_W) / 2;
+
+    int16_t cx = indent + col * BOOT_CELL_W + BOOT_CELL_W / 2;
     int16_t cy = BOOT_GRID_TOP + row * BOOT_CELL_H;
 
     int16_t bx = cx - BOOT_BOX / 2;

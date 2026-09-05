@@ -16,8 +16,9 @@ extern "C" {
  *
  * This is a presentation list rather than the peripheral enum: it covers things
  * that are not peripherals at all (the filesystem, the mesh) and leaves out one
- * that is but never starts (the microphone). Twelve of them, which is what fits
- * the grid four across.
+ * that is but never starts (the microphone, and the motion sensor that nothing
+ * reads). A short last row is centred, so the count can change without leaving
+ * a gap that would read as a system which failed to start.
  */
 enum {
     BOOT_DISPLAY = 0,
@@ -28,7 +29,6 @@ enum {
     BOOT_GAUGE,
     BOOT_SDCARD,
     BOOT_GPS,
-    BOOT_MOTION,
     BOOT_LIGHT,
     BOOT_MODEM,
     BOOT_MESH,

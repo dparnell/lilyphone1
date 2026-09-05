@@ -194,8 +194,8 @@ custom variables, statistics, telemetry, signing and flood scoping are not.
 **Starting up.** Bringing this board up takes several seconds, most of it the
 modem, and the panel used to show one static word for the whole wait — which
 looks the same as a phone that has hung. The boot screen now draws a grid of the
-twelve systems being started, fills each icon in as it comes up, and names the
-one being waited on underneath. A system that never answers is left as an empty
+systems being started, fills each icon in as it comes up, and names the one
+being waited on underneath. A system that never answers is left as an empty
 frame; one that failed is struck through. So a glance at the end of a boot says
 what is and is not working, which used to mean reading the serial log.
 

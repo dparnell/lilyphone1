@@ -140,6 +140,13 @@ There is **no independent speaker path**. `BOARD_I2S_BCLK/DOUT/LRC` in `utilitie
 
 The modem is the only route to a speaker, via `modem_play_tone()` (`AT+CPTONE`). Whether a speaker is fitted and whether the firmware implements that command is unverified; an unsupported module answers ERROR and nothing happens, which is why the sound setting defaults to off.
 
+### Dead hardware from the vendor firmware
+
+Two sensors are fitted, have drivers, and are read by nothing.
+
+- **The BHI260AP motion sensor is no longer started.** `BHI260AP_get_val()` had no callers, and `BHI260AP_init()` uploads a firmware image to the sensor over I2C and then configures accelerometer and gyroscope streaming at 100Hz that nobody ever services. Dropping the call took **115KB of flash** with it, because the linker then discards SensorLib's driver and the blob it carries. `src/peripherals/peri_gyroscope.cpp` and its declarations are kept, so restoring it is one line in `setup()` plus a row in `boot_screen.cpp` - but anything doing so needs to service `bhy.update()` as well.
+- **The LTR-553ALS light and proximity sensor is in the same position** - initialised at boot, `LTR_553ALS_get_channel()` and `LTR_553ALS_get_ps()` never called - except that it is still started, and still appears on the boot screen and the self test.
+
 ### MeshCore
 
 `src/apps/mesh_net.cpp` runs a MeshCore node and **owns the SX1262** — the vendor's `peri_lora.cpp` demo was removed because two drivers cannot share one radio. It runs on its own task, not an LVGL timer: a missed receive window loses a packet, and the LVGL task blocks for hundreds of milliseconds pushing frames to the panel.

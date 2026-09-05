@@ -2777,7 +2777,6 @@ static ui_test_handle test_handle_list[] = {
     { .name="A7682E",     .peri_id=E_PERI_A7682E     , .cb=ui_test_get },
     { .name="Keypad",     .peri_id=E_PERI_KYEPAD     , .cb=ui_test_get },
     { .name="GPS",        .peri_id=E_PERI_GPS        , .cb=ui_test_get },
-    { .name="BHI260AP",   .peri_id=E_PERI_BHI260AP   , .cb=ui_test_get },
     { .name="LTR_553ALS", .peri_id=E_PERI_LTR_553ALS , .cb=ui_test_get },
     { .name="INK_SCREEN", .peri_id=E_PERI_INK_SCREEN , .cb=ui_test_get },
 };

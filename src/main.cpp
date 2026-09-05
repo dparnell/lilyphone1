@@ -556,9 +556,6 @@ void setup() {
   boot_screen_busy(BOOT_GPS);
   peri_init_st[E_PERI_GPS]        = boot_screen_done(BOOT_GPS, gps_init());
 
-  boot_screen_busy(BOOT_MOTION);
-  peri_init_st[E_PERI_BHI260AP]   = boot_screen_done(BOOT_MOTION, BHI260AP_init());
-
   boot_screen_busy(BOOT_LIGHT);
   peri_init_st[E_PERI_LTR_553ALS] = boot_screen_done(BOOT_LIGHT, LTR553_init());
   // Restore the chosen time zone before anything renders a clock.
