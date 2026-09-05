@@ -7,6 +7,17 @@
 
 SensorLTR553 als;
 
+/* Why the sensor is not available, kept so that whatever asks later can say -
+ * the diagnosis happens once at boot, while the complaint about it missing
+ * turns up whenever something wants a reading, by which time the boot log has
+ * long scrolled past. */
+static char ltr553_why[72] = "not started yet";
+
+const char *LTR553_status(void)
+{
+    return ltr553_why;
+}
+
 bool LTR553_init(void)
 {
     /* Whether anything is there at all, asked separately from whether the
@@ -15,18 +26,23 @@ bool LTR553_init(void)
      * gave up on, and those want very different responses. */
     Wire.beginTransmission(LTR553_SLAVE_ADDRESS);
     if (Wire.endTransmission() != 0) {
-        Serial.printf("Nothing answers at 0x%02X - the LTR553 is not fitted or not powered\n",
-                      LTR553_SLAVE_ADDRESS);
+        snprintf(ltr553_why, sizeof(ltr553_why),
+                 "nothing answers at 0x%02X, so it is not fitted or not powered",
+                 LTR553_SLAVE_ADDRESS);
+        Serial.printf("[LTR553] %s\n", ltr553_why);
         return false;
     }
 
     if (!als.begin(Wire, LTR553_SLAVE_ADDRESS, BOARD_I2C_SDA, BOARD_I2C_SCL)) {
-        Serial.printf("The LTR553 answers but would not start; manufacturer id %02X, expected %02X\n",
-                      als.getManufacturerID(), LTR553_DEFAULT_MAN_ID);
+        snprintf(ltr553_why, sizeof(ltr553_why),
+                 "it answers but its id read back as %02X, not %02X",
+                 als.getManufacturerID(), LTR553_DEFAULT_MAN_ID);
+        Serial.printf("[LTR553] %s\n", ltr553_why);
         return false;
     }
 
-    Serial.println("Init LTR553 Sensor success!");
+    snprintf(ltr553_why, sizeof(ltr553_why), "started");
+    Serial.println("[LTR553] started");
 
     // Set the ambient light high and low thresholds.
     // If the value exceeds or falls below the set value, an interrupt will be triggered.

@@ -531,7 +531,8 @@ void ui_proximity_tick(void)
         // sensor working and seeing nothing.
         if(millis() - prox_logged > 5000) {
             prox_logged = millis();
-            Serial.println("[PROX] the light sensor did not start; ear detect cannot work");
+            Serial.printf("[PROX] ear detect needs the light sensor, and %s\n",
+                          LTR553_status());
         }
         return;
     }

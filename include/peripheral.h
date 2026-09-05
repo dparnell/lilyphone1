@@ -42,6 +42,8 @@ void BHI260AP_get_val(int val_type, float *x, float *y, float *z);
 
 // LTR553
 bool LTR553_init(void);
+/* Why it is not available, for whatever asks after the boot log has scrolled. */
+const char *LTR553_status(void);
 uint16_t LTR_553ALS_get_channel(int ch); // ch 0~1
 uint16_t LTR_553ALS_get_ps(void);
 
