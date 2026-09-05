@@ -146,6 +146,7 @@ Two sensors are fitted, have drivers, and are read by nothing.
 
 - **The BHI260AP motion sensor is no longer started.** `BHI260AP_get_val()` had no callers, and `BHI260AP_init()` uploads a firmware image to the sensor over I2C and then configures accelerometer and gyroscope streaming at 100Hz that nobody ever services. Dropping the call took **115KB of flash** with it, because the linker then discards SensorLib's driver and the blob it carries. `src/peripherals/peri_gyroscope.cpp` and its declarations are kept, so restoring it is one line in `setup()` plus a row in `boot_screen.cpp` - but anything doing so needs to service `bhy.update()` as well.
 - **The LTR-553ALS proximity channel now has a user** - ear detect, below. Its ambient light channel still has none.
+- **SensorLib's `SensorLTR553.hpp` carries a local change**, marked in the file: `initImpl()` waits for the software reset to complete before reading the manufacturer ID. Upstream reads it on the very next instruction, but a reset takes the part off the bus while it comes back - so `begin()` always failed and every build of this firmware reported the light sensor as absent. `LTR553_init()` now also probes the address first, so "not fitted" and "fitted but the driver gave up" are told apart in the log.
 - **The LTR-553ALS light channel is in the same position** - initialised at boot, `LTR_553ALS_get_channel()` and `LTR_553ALS_get_ps()` never called - except that it is still started, and still appears on the boot screen and the self test.
 
 ### MeshCore

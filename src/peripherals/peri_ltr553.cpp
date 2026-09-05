@@ -9,8 +9,20 @@ SensorLTR553 als;
 
 bool LTR553_init(void)
 {
+    /* Whether anything is there at all, asked separately from whether the
+     * driver could bring it up. "Failed to find" used to cover both a part that
+     * is not fitted and one that is fitted and answering but that the driver
+     * gave up on, and those want very different responses. */
+    Wire.beginTransmission(LTR553_SLAVE_ADDRESS);
+    if (Wire.endTransmission() != 0) {
+        Serial.printf("Nothing answers at 0x%02X - the LTR553 is not fitted or not powered\n",
+                      LTR553_SLAVE_ADDRESS);
+        return false;
+    }
+
     if (!als.begin(Wire, LTR553_SLAVE_ADDRESS, BOARD_I2C_SDA, BOARD_I2C_SCL)) {
-        Serial.println("Failed to find LTR553 - check your wiring!");
+        Serial.printf("The LTR553 answers but would not start; manufacturer id %02X, expected %02X\n",
+                      als.getManufacturerID(), LTR553_DEFAULT_MAN_ID);
         return false;
     }
 

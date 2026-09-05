@@ -333,6 +333,24 @@ private:
     {
         setReadRegisterSendStop(false);
         reset();
+
+        /* LOCAL CHANGE (lilyphone1), not upstream.
+         *
+         * A software reset takes the part off the bus while it comes back, and
+         * upstream reads the manufacturer ID on the very next instruction - so
+         * init() saw a failed read, decided the chip was absent, and every
+         * build of this firmware has reported the light sensor as missing.
+         *
+         * The reset bit clears itself when the part is ready, which is the
+         * part's own way of saying so. Waiting on that rather than a fixed
+         * delay keeps the usual case quick. */
+        for (int i = 0; i < 20; i++) {
+            delay(10);
+
+            int contr = readRegister(LTR553_REG_ALS_CONTR);
+            if (contr != DEV_WIRE_ERR && (contr & 0x02) == 0) break;
+        }
+
         return getManufacturerID() == LTR553_DEFAULT_MAN_ID;
     }
 
