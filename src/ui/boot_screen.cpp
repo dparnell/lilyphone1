@@ -55,7 +55,6 @@ static const struct {
     { boot_icon_gauge,    "Battery"  },
     { boot_icon_sdcard,   "SD card"  },
     { boot_icon_gps,      "GPS"      },
-    { boot_icon_motion,   "Motion"   },
     { boot_icon_light,    "Light"    },
     { boot_icon_modem,    "Modem"    },
     { boot_icon_mesh,     "Mesh"     },
