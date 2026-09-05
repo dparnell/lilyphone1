@@ -76,6 +76,10 @@ static void *disp_buf_alloc(size_t bytes, bool prefer_psram = false)
         }
         p = ps_malloc(bytes);
     }
+
+    // Whichever was asked for, take the other rather than boot with no display.
+    if(p == NULL) p = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
     if(p) memset(p, 0, bytes);
     return p;
 }
