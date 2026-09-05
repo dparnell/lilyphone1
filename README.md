@@ -204,6 +204,20 @@ are rate limited: a run of fast steps collapses into one, while a slow step gets
 its own, which is where the information is actually wanted. The old splash was a
 full-screen refresh of its own, so this is close to free.
 
+**Ear detect.** A capacitive panel cannot tell a cheek from a fingertip, so a
+call held to your ear is a call being hung up and dialled into by the side of
+your head. With *Ear Detect* on, the proximity sensor suppresses the touch panel
+while the phone is against a face during a call.
+
+It is off by default, and deliberately narrow. It runs only while a call is
+connected, so a sensor stuck reporting "near" cannot lock the phone up. It
+suppresses touch only — the keyboard still works, so there is always a way to
+end the call. And its threshold is relative to a baseline taken when the call
+connects, because cover glass and ambient infrared both offset the reading and
+neither is the same on two devices or in two rooms. What the sensor reads is
+logged once a second during a call, so the thresholds can be set against the
+real thing.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 

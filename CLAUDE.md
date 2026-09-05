@@ -145,7 +145,8 @@ The modem is the only route to a speaker, via `modem_play_tone()` (`AT+CPTONE`).
 Two sensors are fitted, have drivers, and are read by nothing.
 
 - **The BHI260AP motion sensor is no longer started.** `BHI260AP_get_val()` had no callers, and `BHI260AP_init()` uploads a firmware image to the sensor over I2C and then configures accelerometer and gyroscope streaming at 100Hz that nobody ever services. Dropping the call took **115KB of flash** with it, because the linker then discards SensorLib's driver and the blob it carries. `src/peripherals/peri_gyroscope.cpp` and its declarations are kept, so restoring it is one line in `setup()` plus a row in `boot_screen.cpp` - but anything doing so needs to service `bhy.update()` as well.
-- **The LTR-553ALS light and proximity sensor is in the same position** - initialised at boot, `LTR_553ALS_get_channel()` and `LTR_553ALS_get_ps()` never called - except that it is still started, and still appears on the boot screen and the self test.
+- **The LTR-553ALS proximity channel now has a user** - ear detect, below. Its ambient light channel still has none.
+- **The LTR-553ALS light channel is in the same position** - initialised at boot, `LTR_553ALS_get_channel()` and `LTR_553ALS_get_ps()` never called - except that it is still started, and still appears on the boot screen and the self test.
 
 ### MeshCore
 
@@ -197,6 +198,18 @@ The board adapter, radio settings, advertisement handling and the chat engine ar
 `src/apps/phone_store.cpp` keeps contacts and a bounded message log in PSRAM, mirrored to SPIFFS as TSV (`/contacts.tsv`, `/messages.tsv`); each mutation rewrites the file. It is **not** thread-safe — only the LVGL task may call into it, which is why received messages arrive via a queue rather than being written by the modem task.
 
 Numbers are compared by `phone_number_match()` (last 7 digits, digits only), so `+61412345678` / `0412345678` / `412345678` are one contact. Conversations are derived from the log on demand, not stored, so any thread index is only valid until the log changes.
+
+### Ear detect
+
+`ui_proximity_tick()` in `ui_phone1_port.cpp` polls the LTR-553ALS proximity channel from a 250ms LVGL timer and sets a flag that `touchpad_read()` in `main.cpp` acts on — that input driver is the only place that can suppress touch, so it is the only place that does.
+
+Three properties keep a misreading from being serious, and any change here should preserve them:
+
+- **It only runs while a call is connected.** A sensor stuck at "near" cannot lock the phone up, because nothing asks it outside a call. `ui_setting_set_ear_detect(false)` also clears the flag rather than leaving the panel suppressed.
+- **It suppresses touch only.** The keyboard stays live, so there is always a way to end the call. A physical key needs travel; a capacitive panel needs only skin.
+- **The threshold is relative to a baseline** sampled when the call connects and allowed to follow the reading downward while nothing is near. Cover glass crosstalk and ambient infrared both offset the raw count, so a fixed threshold would be wrong on the next device or in the next room.
+
+`touchpad_read()` reports `LV_INDEV_STATE_REL` while suppressed rather than returning early, or LVGL would be left holding a press that is never released. The thresholds (`PROX_NEAR_RISE`, `PROX_FAR_RISE`, `PROX_MIN_NEAR`) are guesses, not measurements; the raw reading is logged once a second during a call so they can be tuned.
 
 ### Input
 

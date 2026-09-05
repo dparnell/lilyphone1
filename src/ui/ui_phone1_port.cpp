@@ -387,6 +387,9 @@ void ui_phone_vibrate(int ms)
 static int autolock_choice;
 static void notify_save(void);
 
+// Off until it has been shown to work on this hardware; see ui_proximity_tick().
+static bool prox_enabled = false;
+
 static void notify_save(void)
 {
     Preferences prefs;
@@ -396,6 +399,7 @@ static void notify_save(void)
     prefs.putBool("vib_text", notify_vibrate_text);
     prefs.putBool("snd_text", notify_sound_text);
     prefs.putInt("autolock", autolock_choice);
+    prefs.putBool("ear", prox_enabled);
     prefs.end();
 }
 
@@ -440,6 +444,7 @@ void ui_settings_load(void)
     notify_vibrate_text = prefs.getBool("vib_text", notify_vibrate_text);
     notify_sound_text   = prefs.getBool("snd_text", notify_sound_text);
     autolock_choice     = prefs.getInt("autolock", autolock_choice);
+    prox_enabled        = prefs.getBool("ear", prox_enabled);
     prefs.end();
 
     if(autolock_choice < 0 ||
@@ -450,6 +455,87 @@ void ui_settings_load(void)
     Serial.printf("[NOTIFY] call buzz %d, text buzz %d, text sound %d, auto lock %s\n",
                   notify_vibrate_call, notify_vibrate_text, notify_sound_text,
                   ui_setting_autolock_text());
+}
+
+//************************************[ ear detect ]****************************
+/* Ignoring the touch panel while the phone is against your face.
+ *
+ * A capacitive panel cannot tell a cheek from a fingertip, so a call held to the
+ * ear is a call being hung up, muted and dialled into by the side of your head.
+ * The LTR-553ALS has a proximity channel a few centimetres deep, which is what
+ * every phone uses to solve this.
+ *
+ * Three things keep a misreading from being serious:
+ *
+ * - It only ever runs while a call is connected. A sensor stuck reporting
+ *   "near" cannot lock the phone up, because outside a call nothing asks it.
+ * - It suppresses the touch panel only. The keyboard still works, so there is
+ *   always a way to end the call - a physical key needs real travel, where a
+ *   capacitive panel only needs skin.
+ * - The threshold is relative to a baseline taken when the call starts, and the
+ *   baseline follows the reading down while nothing is near. Cover glass
+ *   crosstalk and ambient infrared both offset the raw count, and neither is
+ *   the same on two devices or in two rooms.
+ *
+ * The numbers below are a starting point rather than a measurement. What the
+ * sensor actually reads against a face is logged during a call so it can be
+ * tuned against the real thing.
+ */
+#define PROX_NEAR_RISE   100   // counts above the baseline before it is an ear
+#define PROX_FAR_RISE     50   // and back under this before it is not
+#define PROX_MIN_NEAR    100   // an absolute floor, whatever the baseline says
+
+static bool     prox_near     = false;
+static uint16_t prox_baseline = 0;
+static bool     prox_in_call  = false;
+static uint32_t prox_logged   = 0;
+
+void ui_setting_set_ear_detect(bool on)
+{
+    prox_enabled = on;
+    if(!on) prox_near = false;           // never leave the panel suppressed
+    notify_save();
+}
+
+bool ui_setting_get_ear_detect(void) { return prox_enabled; }
+
+bool ui_touch_suppressed(void) { return prox_near; }
+
+void ui_proximity_tick(void)
+{
+    bool in_call = (ui_phone_get_call_state() == MODEM_CALL_ACTIVE);
+
+    if(!prox_enabled || !in_call || !peri_init_st[E_PERI_LTR_553ALS]) {
+        // Outside a call the panel is never suppressed, whatever the sensor says.
+        prox_near    = false;
+        prox_in_call = false;
+        return;
+    }
+
+    uint16_t ps = LTR_553ALS_get_ps();
+
+    if(!prox_in_call) {
+        // The call has just connected and the phone is still being looked at,
+        // which makes this as good a reading of "nothing near" as there is.
+        prox_in_call  = true;
+        prox_baseline = ps;
+        prox_near     = false;
+    }
+
+    if(prox_near) {
+        if(ps < prox_baseline + PROX_FAR_RISE) prox_near = false;
+    } else {
+        if(ps < prox_baseline) prox_baseline = ps;   // follow the drift down
+        if(ps > prox_baseline + PROX_NEAR_RISE && ps > PROX_MIN_NEAR) prox_near = true;
+    }
+
+    // Once a second while a call is up, so the thresholds above can be set
+    // against what the sensor really reads rather than what it ought to.
+    if(millis() - prox_logged > 1000) {
+        prox_logged = millis();
+        Serial.printf("[PROX] %u (baseline %u) %s\n",
+                      (unsigned)ps, (unsigned)prox_baseline, prox_near ? "at ear" : "clear");
+    }
 }
 
 void ui_setting_set_vibrate_call(bool on) { notify_vibrate_call = on; notify_save(); }

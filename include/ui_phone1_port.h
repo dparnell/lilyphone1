@@ -65,6 +65,19 @@ void ui_setting_autolock_next(void);
 /* Restores them from NVS. Call before the settings screen is built. */
 void ui_settings_load(void);
 
+/* Ear detect: ignore the touch panel while the phone is against a face during a
+ * call, so a cheek cannot hang it up. Off by default. */
+void ui_setting_set_ear_detect(bool on);
+bool ui_setting_get_ear_detect(void);
+
+/* Whether the touch panel should be ignored right now. Read by the input
+ * driver, which is the one place that can act on it. */
+bool ui_touch_suppressed(void);
+
+/* Samples the proximity sensor. Cheap, and does nothing at all unless a call is
+ * connected and the setting is on. */
+void ui_proximity_tick(void);
+
 /* Act on whatever the user has enabled. The call sites do not need to know
  * which of vibration or sound is switched on. */
 void ui_notify_incoming_call(void);

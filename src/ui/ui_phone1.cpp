@@ -2134,6 +2134,7 @@ static ui_setting_handle setting_handle_list[] = {
     {.name = "Vibrate on Call",  .icon = LV_SYMBOL_CALL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_vibrate_call, .get_cb = ui_setting_get_vibrate_call},
     {.name = "Vibrate on Text",  .icon = LV_SYMBOL_ENVELOPE, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_vibrate_text, .get_cb = ui_setting_get_vibrate_text},
     {.name = "Sound on Text",    .icon = LV_SYMBOL_VOLUME_MAX, .type=UI_SETTING_TYPE_SW, .set_cb = ui_setting_set_sound_text,  .get_cb = ui_setting_get_sound_text},
+    {.name = "Ear Detect",       .icon = LV_SYMBOL_CALL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_ear_detect,   .get_cb = ui_setting_get_ear_detect},
     {.name = "Keypad Backlight", .icon = LV_SYMBOL_KEYBOARD, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_keypad_light, .get_cb = ui_setting_get_keypad_light},
     {.name = "Motor Status",     .icon = LV_SYMBOL_BELL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
     {.name = "Power GPS",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},
@@ -5998,11 +5999,21 @@ static void phone_event_timer_cb(lv_timer_t *t)
     last_call_state = call_state;
 }
 
+static void ui_proximity_timer_cb(lv_timer_t *t)
+{
+    LV_UNUSED(t);
+    ui_proximity_tick();
+}
+
 void ui_phone1_entry(void)
 {
     // Before any label exists: the wrappers are zeroed until this runs.
     ui_fonts_init();
     ui_settings_load();
+
+    /* Fast enough to feel immediate when the phone reaches an ear, and idle
+     * whenever there is no call to suppress touch during. */
+    lv_timer_create(ui_proximity_timer_cb, 250, NULL);
 
     lv_disp_t *disp = lv_disp_get_default();
     disp->theme = lv_theme_mono_init(disp, false, LV_FONT_DEFAULT);

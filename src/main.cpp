@@ -5,6 +5,7 @@
 #include <TinyGPS++.h>
 #include "lvgl.h"
 #include "ui_phone1.h"
+#include "ui_phone1_port.h"
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include "main.h"
 #include "peripheral.h"
@@ -262,6 +263,17 @@ static void touchpad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
     static lv_coord_t last_y = 0;
 
     uint8_t touched = touch.getPoint(&last_x, &last_y, 1);
+
+    /* The phone is against a face, so this is a cheek rather than a finger.
+     * Reported as released rather than simply ignored, or LVGL would be left
+     * holding a press that was never let go. */
+    if(ui_touch_suppressed()) {
+        touch_is_down = false;
+        data->state   = LV_INDEV_STATE_REL;
+        data->point.x = last_x;
+        data->point.y = last_y;
+        return;
+    }
 
     touch_is_down = touched != 0;
 
