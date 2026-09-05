@@ -501,27 +501,29 @@ void setup() {
   int nDevices = 0;
   Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
   Serial.printf(" ------------- I2C ------------- \n");
+  /* Every address that answers, named where the name is known and reported
+   * anyway where it is not. The old scan counted devices it then said nothing
+   * about, and printed the count nowhere - so a part at an unexpected address,
+   * or missing from an expected one, both looked like silence. */
   for(address = 0x01; address < 0x7F; address++){
       Wire.beginTransmission(address);
       error = Wire.endTransmission();
-      if(error == 0){ // 0: success.
-          nDevices++;
-          if(address == BOARD_I2C_ADDR_TOUCH){
-              // flag_Touch_init = true;
-              Serial.printf("[0x%x] TOUCH found!\n", address);
-          } else if (address == BOARD_I2C_ADDR_LTR_553ALS) {
-              Serial.printf("[0x%x] LTR_553ALS found!\n", address);
-          } else if (address == BOARD_I2C_ADDR_GYROSCOPDE) {
-              Serial.printf("[0x%x] GYROSCOPDE found!\n", address);
-          } else if (address == BOARD_I2C_ADDR_KEYBOARD) {
-              Serial.printf("[0x%x] KEYBOARD found!\n", address);
-          } else if (address == BOARD_I2C_ADDR_BQ27220) {
-              Serial.printf("[0x%x] BQ27220 found!\n", address);
-          } else if (address == BOARD_I2C_ADDR_BQ25896) {
-              Serial.printf("[0x%x] BQ25896 found!\n", address);
-          }
-      }
+      if(error != 0) continue;   // 0: success.
+
+      nDevices++;
+
+      const char *name = "unrecognised";
+      if(address == BOARD_I2C_ADDR_TOUCH)           name = "touch panel";
+      else if(address == BOARD_I2C_ADDR_LTR_553ALS) name = "LTR-553ALS light and proximity";
+      else if(address == BOARD_I2C_ADDR_GYROSCOPDE) name = "BHI260AP motion";
+      else if(address == BOARD_I2C_ADDR_KEYBOARD)   name = "TCA8418 keyboard";
+      else if(address == BOARD_I2C_ADDR_BQ27220)    name = "BQ27220 fuel gauge";
+      else if(address == BOARD_I2C_ADDR_BQ25896)    name = "BQ25896 charger";
+
+      Serial.printf("[0x%02X] %s\n", address, name);
   }
+
+  Serial.printf("%d device%s answered\n", nDevices, nDevices == 1 ? "" : "s");
 
   Serial.printf(" ------------- SPIFFS ------------- \n");
 

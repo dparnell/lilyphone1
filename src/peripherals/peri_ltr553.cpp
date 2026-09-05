@@ -18,19 +18,36 @@ const char *LTR553_status(void)
     return ltr553_why;
 }
 
+static bool ltr553_answers(void)
+{
+    Wire.beginTransmission(LTR553_SLAVE_ADDRESS);
+    return Wire.endTransmission() == 0;
+}
+
 bool LTR553_init(void)
 {
     /* Whether anything is there at all, asked separately from whether the
      * driver could bring it up. "Failed to find" used to cover both a part that
      * is not fitted and one that is fitted and answering but that the driver
      * gave up on, and those want very different responses. */
-    Wire.beginTransmission(LTR553_SLAVE_ADDRESS);
-    if (Wire.endTransmission() != 0) {
-        snprintf(ltr553_why, sizeof(ltr553_why),
-                 "nothing answers at 0x%02X, so it is not fitted or not powered",
-                 LTR553_SLAVE_ADDRESS);
-        Serial.printf("[LTR553] %s\n", ltr553_why);
-        return false;
+    if (!ltr553_answers()) {
+        /* A second chance with the sensor supply explicitly up. BOARD_1V8_EN
+         * switches the 1.8V rail - it is named for the gyroscope, but this part
+         * sits on it too - and something just given power needs a moment before
+         * it will answer for itself. */
+        pinMode(BOARD_1V8_EN, OUTPUT);
+        digitalWrite(BOARD_1V8_EN, HIGH);
+        delay(50);
+
+        if (!ltr553_answers()) {
+            snprintf(ltr553_why, sizeof(ltr553_why),
+                     "nothing answers at 0x%02X even with the 1.8V rail up",
+                     LTR553_SLAVE_ADDRESS);
+            Serial.printf("[LTR553] %s\n", ltr553_why);
+            return false;
+        }
+
+        Serial.println("[LTR553] answered only after the 1.8V rail was re-enabled");
     }
 
     if (!als.begin(Wire, LTR553_SLAVE_ADDRESS, BOARD_I2C_SDA, BOARD_I2C_SCL)) {
