@@ -955,7 +955,8 @@ static void handle_request(const modem_req_t *req)
             Serial.println("[MODEM] asking which indicator commands this module has");
 
             char line[MODEM_LINE_MAX];
-            int  found = 0;
+            int  found = 0, lines = 0;
+            bool accepted = false;
 
             while(SerialAT.available()) SerialAT.read();
             modem_write_line("AT+CLAC");
@@ -963,7 +964,16 @@ static void handle_request(const modem_req_t *req)
             uint32_t start = millis();
             while(millis() - start < 10000) {
                 if(modem_read_line(line, sizeof(line), 300) < 0) continue;
-                if(strcmp(line, "OK") == 0 || strcmp(line, "ERROR") == 0) break;
+
+                if(strcmp(line, "OK") == 0) { accepted = true; break; }
+                if(strcmp(line, "ERROR") == 0 || strncmp(line, "+CME ERROR", 10) == 0) break;
+                if(strcmp(line, "AT+CLAC") == 0) continue;   // the echo
+
+                lines++;
+
+                // A few verbatim, so a list that came back but held nothing of
+                // interest is distinguishable from no list at all.
+                if(lines <= 3) Serial.printf("[MODEM] clac: %s\n", line);
 
                 if(strstr(line, "LED")   || strstr(line, "LIGHT") ||
                    strstr(line, "GPIO")  || strstr(line, "CSGS")  ||
@@ -974,8 +984,11 @@ static void handle_request(const modem_req_t *req)
                 }
             }
 
-            Serial.printf("[MODEM] %d candidate command(s); nothing listed means the\n"
-                          "module offers no way to control its LEDs\n", found);
+            /* All three numbers matter. Refused, or accepted with no lines,
+             * means AT+CLAC told us nothing and the question is still open;
+             * accepted with many lines and no candidates is the real answer. */
+            Serial.printf("[MODEM] AT+CLAC %s, %d command(s) listed, %d LED candidate(s)\n",
+                          accepted ? "accepted" : "refused or timed out", lines, found);
             break;
         }
 
