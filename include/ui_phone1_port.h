@@ -73,6 +73,11 @@ bool ui_setting_get_netlight(void);
  * some modules. Does nothing when the light is meant to be on. */
 void ui_netlight_apply(void);
 
+/* Asks the module which of its commands could touch an LED, and prints them.
+ * Temporary scaffolding while the right command is unknown. */
+const char *ui_modem_led_probe_text(void);
+void ui_modem_led_probe(void);
+
 /* Ear detect: ignore the touch panel while the phone is against a face during a
  * call, so a cheek cannot hang it up. Off by default. */
 void ui_setting_set_ear_detect(bool on);

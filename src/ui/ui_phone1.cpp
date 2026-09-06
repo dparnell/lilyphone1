@@ -2137,6 +2137,8 @@ static ui_setting_handle setting_handle_list[] = {
     {.name = "Ear Detect",       .icon = LV_SYMBOL_CALL,     .type=UI_SETTING_TYPE_CHOICE,
      .text_cb = ui_setting_ear_detect_text, .next_cb = ui_setting_ear_detect_next},
     {.name = "Modem LED",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_netlight,     .get_cb = ui_setting_get_netlight},
+    {.name = "Modem LED Probe",  .icon = LV_SYMBOL_LIST,     .type=UI_SETTING_TYPE_CHOICE,
+     .text_cb = ui_modem_led_probe_text, .next_cb = ui_modem_led_probe},
     {.name = "Keypad Backlight", .icon = LV_SYMBOL_KEYBOARD, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_keypad_light, .get_cb = ui_setting_get_keypad_light},
     {.name = "Motor Status",     .icon = LV_SYMBOL_BELL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
     {.name = "Power GPS",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},

@@ -623,14 +623,27 @@ void ui_setting_set_netlight(bool on)
 
     modem_request_at(on ? "AT+CNETLIGHT=1" : "AT+CNETLIGHT=0");
     Serial.printf("[MODEM] asked for the network light %s\n", on ? "on" : "off");
-
-    /* AT+CNETLIGHT is SIMCom's command for this and this module answers ERROR
-     * to it, so until the right one is known, turning the light off also asks
-     * the module what it does implement. Remove this once the answer is in. */
-    if(!on) modem_request_led_survey();
 }
 
 bool ui_setting_get_netlight(void) { return netlight_on; }
+
+/* Asking the module what it can do about its LEDs.
+ *
+ * Its own row rather than a side effect of the switch above, because that only
+ * fired on the off-edge - and with the setting remembered as off, pressing it
+ * turned the light back on and surveyed nothing. A diagnostic that runs on one
+ * edge of a persisted toggle is a diagnostic that will not run when you want
+ * it. Temporary: it goes once the right command is known. */
+const char *ui_modem_led_probe_text(void)
+{
+    return "Run";
+}
+
+void ui_modem_led_probe(void)
+{
+    Serial.println("[MODEM] LED probe requested");
+    modem_request_led_survey();
+}
 
 void ui_netlight_apply(void)
 {
