@@ -38,6 +38,7 @@ enum {
     REQ_HANGUP,
     REQ_SEND_SMS,
     REQ_RAW_AT,
+    REQ_AT_SURVEY,
     REQ_TONE,
 };
 
@@ -476,7 +477,8 @@ static void handle_urc(const char *line);
  * that are actually URCs are dispatched instead of being handed back, so an
  * incoming call during an AT exchange is not lost. `first_resp`, when given,
  * receives the first non-URC informational line. */
-static bool modem_exec(const char *cmd, char *first_resp, int resp_len, uint32_t timeout_ms)
+static bool modem_exec(const char *cmd, char *first_resp, int resp_len, uint32_t timeout_ms,
+                       bool echo = false)
 {
     char line[MODEM_LINE_MAX];
     bool got_resp = false;
@@ -491,6 +493,10 @@ static bool modem_exec(const char *cmd, char *first_resp, int resp_len, uint32_t
     uint32_t start = millis();
     while(millis() - start < timeout_ms) {
         if(modem_read_line(line, sizeof(line), 200) < 0) continue;
+
+        // Only the first line is handed back to the caller, so anything asked
+        // for by hand needs the rest printed or it is simply lost.
+        if(echo) Serial.printf("[AT] %s\n", line);
 
         if(strcmp(line, "OK") == 0) return true;
         if(strcmp(line, "ERROR") == 0) return false;
@@ -934,8 +940,42 @@ static void handle_request(const modem_req_t *req)
 
         case REQ_RAW_AT: {
             char resp[MODEM_LINE_MAX];
-            bool ok = modem_exec(req->text, resp, sizeof(resp), 5000);
+            bool ok = modem_exec(req->text, resp, sizeof(resp), 5000, true);
             Serial.printf("[MODEM] %s -> %s %s\n", req->text, ok ? "OK" : "ERROR", resp);
+            break;
+        }
+
+        case REQ_AT_SURVEY: {
+            /* What this module can actually be asked about its indicators.
+             *
+             * AT+CLAC lists every command the firmware implements, which settles
+             * by evidence what no datasheet to hand would - but it runs to
+             * hundreds of lines, so only the few that could plausibly touch an
+             * LED or a pin are printed. */
+            Serial.println("[MODEM] asking which indicator commands this module has");
+
+            char line[MODEM_LINE_MAX];
+            int  found = 0;
+
+            while(SerialAT.available()) SerialAT.read();
+            modem_write_line("AT+CLAC");
+
+            uint32_t start = millis();
+            while(millis() - start < 10000) {
+                if(modem_read_line(line, sizeof(line), 300) < 0) continue;
+                if(strcmp(line, "OK") == 0 || strcmp(line, "ERROR") == 0) break;
+
+                if(strstr(line, "LED")   || strstr(line, "LIGHT") ||
+                   strstr(line, "GPIO")  || strstr(line, "CSGS")  ||
+                   strstr(line, "CGFUNC")|| strstr(line, "CGDRT") ||
+                   strstr(line, "CGSETV")) {
+                    Serial.printf("[MODEM] candidate: %s\n", line);
+                    found++;
+                }
+            }
+
+            Serial.printf("[MODEM] %d candidate command(s); nothing listed means the\n"
+                          "module offers no way to control its LEDs\n", found);
             break;
         }
 
@@ -1665,6 +1705,14 @@ void modem_play_tone(void)
     modem_req_t req;
     memset(&req, 0, sizeof(req));
     req.type = REQ_TONE;
+    modem_post(&req);
+}
+
+void modem_request_led_survey(void)
+{
+    modem_req_t req;
+    memset(&req, 0, sizeof(req));
+    req.type = REQ_AT_SURVEY;
     modem_post(&req);
 }
 

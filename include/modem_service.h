@@ -116,6 +116,11 @@ bool modem_udp_receive(uint8_t *buf, uint16_t buf_len, uint16_t *out_len);
  * Used by the screens that poke at modem features directly. */
 void     modem_request_at(const char *cmd);
 
+/* Asks the module which of its commands could touch an LED or a pin, by
+ * listing what it implements and printing only the relevant few. The answer
+ * to "can this LED be turned off" that no datasheet to hand gives. */
+void     modem_request_led_survey(void);
+
 #ifdef __cplusplus
 } /*extern "C"*/
 #endif
