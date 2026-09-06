@@ -65,6 +65,14 @@ void ui_setting_autolock_next(void);
 /* Restores them from NVS. Call before the settings screen is built. */
 void ui_settings_load(void);
 
+/* The modem module's blinking network status LED. Driven by the modem's own
+ * firmware, so this asks over AT rather than switching a pin. */
+void ui_setting_set_netlight(bool on);
+bool ui_setting_get_netlight(void);
+/* Asks again once the modem is on the network, since the setting is volatile on
+ * some modules. Does nothing when the light is meant to be on. */
+void ui_netlight_apply(void);
+
 /* Ear detect: ignore the touch panel while the phone is against a face during a
  * call, so a cheek cannot hang it up. Off by default. */
 void ui_setting_set_ear_detect(bool on);

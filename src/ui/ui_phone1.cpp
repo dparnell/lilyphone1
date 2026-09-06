@@ -2136,6 +2136,7 @@ static ui_setting_handle setting_handle_list[] = {
     {.name = "Sound on Text",    .icon = LV_SYMBOL_VOLUME_MAX, .type=UI_SETTING_TYPE_SW, .set_cb = ui_setting_set_sound_text,  .get_cb = ui_setting_get_sound_text},
     {.name = "Ear Detect",       .icon = LV_SYMBOL_CALL,     .type=UI_SETTING_TYPE_CHOICE,
      .text_cb = ui_setting_ear_detect_text, .next_cb = ui_setting_ear_detect_next},
+    {.name = "Modem LED",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_netlight,     .get_cb = ui_setting_get_netlight},
     {.name = "Keypad Backlight", .icon = LV_SYMBOL_KEYBOARD, .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_keypad_light, .get_cb = ui_setting_get_keypad_light},
     {.name = "Motor Status",     .icon = LV_SYMBOL_BELL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
     {.name = "Power GPS",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},
@@ -5829,6 +5830,10 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
     bool registered = ui_phone_is_registered();
     if(taskbar_statue[TASKBAR_ID_SIGNAL] != (uint16_t)registered)
     {
+        // The module reasserts its own network light as it joins, so a request
+        // to keep it dark has to follow rather than precede that.
+        if(registered) ui_netlight_apply();
+
         if(registered) {
             lv_obj_clear_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
         } else {

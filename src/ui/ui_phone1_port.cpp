@@ -389,6 +389,8 @@ static void notify_save(void);
 
 // Off until it has been shown to work on this hardware; see ui_proximity_tick().
 static bool prox_enabled = false;
+// The modem's own network status LED; see ui_setting_set_netlight().
+static bool netlight_on = true;
 
 static void notify_save(void)
 {
@@ -400,6 +402,7 @@ static void notify_save(void)
     prefs.putBool("snd_text", notify_sound_text);
     prefs.putInt("autolock", autolock_choice);
     prefs.putBool("ear", prox_enabled);
+    prefs.putBool("netlight", netlight_on);
     prefs.end();
 }
 
@@ -445,6 +448,7 @@ void ui_settings_load(void)
     notify_sound_text   = prefs.getBool("snd_text", notify_sound_text);
     autolock_choice     = prefs.getInt("autolock", autolock_choice);
     prox_enabled        = prefs.getBool("ear", prox_enabled);
+    netlight_on         = prefs.getBool("netlight", netlight_on);
     prefs.end();
 
     // Remembered from a board that had the sensor, or from before it was known
@@ -596,6 +600,39 @@ void ui_proximity_tick(void)
                       prox_near ? "near" : "clear",
                       prox_suppress ? ", touch off" : (in_call ? ", in call" : ""));
     }
+}
+
+//************************************[ modem net light ]***********************
+/* The blinking LED on the modem module.
+ *
+ * It is the module's network status indicator, driven by the modem's own
+ * firmware rather than by anything here - there is no pin on the ESP32 for it,
+ * so the only way to reach it is an AT command. AT+CNETLIGHT is SIMCom's
+ * command for this and is documented for their earlier modules; whether this
+ * one honours it is not something the datasheet to hand answers, so the request
+ * goes down the normal path and the modem's reply is logged either way.
+ *
+ * Sent again whenever the modem comes back on the network, because a setting
+ * like this is volatile on some modules and survives on others, and sending it
+ * twice costs nothing.
+ */
+void ui_setting_set_netlight(bool on)
+{
+    netlight_on = on;
+    notify_save();
+
+    modem_request_at(on ? "AT+CNETLIGHT=1" : "AT+CNETLIGHT=0");
+    Serial.printf("[MODEM] asked for the network light %s\n", on ? "on" : "off");
+}
+
+bool ui_setting_get_netlight(void) { return netlight_on; }
+
+void ui_netlight_apply(void)
+{
+    // Only worth saying when it is not what the module does by default.
+    if(netlight_on) return;
+
+    modem_request_at("AT+CNETLIGHT=0");
 }
 
 void ui_setting_set_vibrate_call(bool on) { notify_vibrate_call = on; notify_save(); }

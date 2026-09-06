@@ -235,6 +235,16 @@ what it reads is logged once a second — so it can be tested by turning the
 setting on and waving a hand at the phone, rather than by ringing somebody.
 Acting on the reading is still confined to a connected call.
 
+**Modem LED.** The modem module has its own network status LED that blinks
+whenever the phone is on the network. *Settings > Modem LED* asks the module to
+stop, over AT, and asks again each time it rejoins - the setting is volatile on
+some SIMCom modules and kept on others. Whether this particular module honours
+the command is not something its datasheet settles, so the modem's answer is
+logged either way; look for `AT+CNETLIGHT` in the serial output.
+
+The module's second LED is its power indicator and is not under software
+control at all.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 
