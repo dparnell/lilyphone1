@@ -90,6 +90,8 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
 #define CMD_SIGN_DATA              34
 #define CMD_SIGN_FINISH            35
 #define CMD_SET_OTHER_PARAMS       38
+#define CMD_GET_CUSTOM_VARS        40
+#define CMD_SET_CUSTOM_VAR         41
 #define CMD_GET_ADVERT_PATH        42
 #define CMD_GET_TUNING_PARAMS      43
 #define CMD_SET_FLOOD_SCOPE_KEY    54
@@ -115,6 +117,7 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
 #define RESP_CODE_CHANNEL_INFO        18
 #define RESP_CODE_SIGN_START          19
 #define RESP_CODE_SIGNATURE           20
+#define RESP_CODE_CUSTOM_VARS         21
 #define RESP_CODE_ADVERT_PATH         22
 #define RESP_CODE_TUNING_PARAMS       23
 #define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
@@ -968,6 +971,44 @@ static void handle_frame(int len)
 
             Serial.printf("[LINK] signed %u bytes for the app\n", (unsigned)sign_data_len);
             sign_release();
+        }
+
+    } else if(cmd == CMD_GET_CUSTOM_VARS) {
+        /* Whatever settings this node chooses to expose, as `name:value` pairs
+         * separated by commas. It is a free-form channel - the app shows
+         * whatever arrives - so only settings that mean something to somebody
+         * looking at the mesh belong here, rather than everything the phone
+         * happens to remember.
+         *
+         * An empty list is a perfectly ordinary answer, and is what a node with
+         * nothing worth exposing returns. */
+        char vars[141];
+        snprintf(vars, sizeof(vars), "loc_share:%d", mesh_net_get_loc_policy());
+
+        int vlen = strlen(vars);
+        out_frame[0] = RESP_CODE_CUSTOM_VARS;
+        memcpy(&out_frame[1], vars, vlen);
+        write_frame(out_frame, 1 + vlen);
+
+    } else if(cmd == CMD_SET_CUSTOM_VAR && len >= 4) {
+        // "name:value", with the separator turned into a terminator in place.
+        char *name  = (char *)&cmd_frame[1];
+        char *value = strchr(name, ':');
+
+        if(value == NULL) {
+            write_err(ERR_CODE_ILLEGAL_ARG);
+        } else {
+            *value++ = '\0';
+
+            if(strcmp(name, "loc_share") == 0) {
+                mesh_net_set_loc_policy(atoi(value));
+                write_ok();
+            } else {
+                // Refused by name rather than accepted and dropped: an app told
+                // a setting was stored will show it as stored.
+                Serial.printf("[LINK] no custom variable called %s\n", name);
+                write_err(ERR_CODE_ILLEGAL_ARG);
+            }
         }
 
     } else if(cmd == CMD_GET_ADVERT_PATH && len >= PUB_KEY_SIZE + 2) {

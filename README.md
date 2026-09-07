@@ -196,8 +196,13 @@ whatever this node has not heard from yet.
 The node reports protocol version 7 and answers anything newer with "unsupported
 command" rather than going quiet. Everything a conversation needs is there —
 contacts, messages, channels, radio settings, device time, adverts, advert
-paths, flood scope, and signing data with the node's key — while custom
-variables, statistics and telemetry are not.
+paths, flood scope, signing data with the node's key, and custom variables —
+while statistics and telemetry are not.
+
+The only custom variable this node exposes is `loc_share`, the position sharing
+policy, which is the one setting worth changing from an app that is not already
+a command of its own. An unknown name is refused rather than quietly accepted,
+so an app told a setting was stored can believe it.
 
 **Starting up.** Bringing this board up takes several seconds, most of it the
 modem, and the panel used to show one static word for the whole wait — which
