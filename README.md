@@ -246,6 +246,12 @@ logged either way; look for `AT+CNETLIGHT` in the serial output.
 The module's second LED is its power indicator and is not under software
 control at all.
 
+**GPS.** A live readout of position, speed, satellites and time, with a reset
+button in the corner. The reset is a cold start - the receiver throws away its
+almanac, its ephemeris and its last known position - which is what to reach for
+when it has got itself confused, at the cost of a first fix that takes minutes
+rather than seconds.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 

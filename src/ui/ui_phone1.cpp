@@ -2456,8 +2456,26 @@ static void scr3_btn_event_cb(lv_event_t * e)
     }
 }
 
-static void create3(lv_obj_t *parent) 
-{   
+static void scr3_reset_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    /* Over a second is spent inside this call, so say what is happening first -
+     * on a panel this slow, an unexplained pause reads as a phone that has
+     * stopped rather than one that is working. */
+    lv_label_set_text(scr3_cnt_lab, " rst ");
+    ui_disp_full_refr();
+    lv_refr_now(NULL);
+
+    bool ok = ui_gps_reset();
+
+    ui_notice("GPS", ok ? "Receiver restarted.\n\nIt has forgotten where it was, so the "
+                          "first fix will take a few minutes."
+                        : "The receiver did not answer.");
+}
+
+static void create3(lv_obj_t *parent)
+{
     scr3_cont = lv_obj_create(parent);
     lv_obj_set_size(scr3_cont, lv_pct(100), lv_pct(88));
     lv_obj_set_style_bg_color(scr3_cont, DECKPRO_COLOR_BG, LV_PART_MAIN);
@@ -2484,9 +2502,11 @@ static void create3(lv_obj_t *parent)
     lv_obj_set_style_text_align(scr3_cnt_lab, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text_fmt(scr3_cnt_lab, " %05d ", 0);
     lv_obj_center(scr3_cnt_lab);
-    lv_obj_align(scr3_cnt_lab, LV_ALIGN_TOP_RIGHT, -10, 10);
+    // Left of the reset button, which takes the corner.
+    lv_obj_align(scr3_cnt_lab, LV_ALIGN_TOP_RIGHT, -44, 10);
 
     scr_back_btn_create(parent, ("GPS"), scr3_btn_event_cb);
+    scr_action_btn_create(parent, LV_SYMBOL_REFRESH, scr3_reset_event);
 }
 static void entry3(void) 
 {

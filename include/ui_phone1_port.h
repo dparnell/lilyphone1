@@ -117,6 +117,9 @@ void ui_setting_get_sd_capacity(uint64_t *total, uint64_t *used);
 // [ screen 3 ] --- GPS
 void ui_gps_task_suspend(void);
 void ui_gps_task_resume(void);
+/* Cold starts the receiver. Blocks for over a second, so it belongs behind a
+ * button and nowhere else. */
+bool ui_gps_reset(void);
 void ui_gps_get_coord(double *lat, double *lng);
 void ui_gps_get_data(uint16_t *year, uint8_t *month, uint8_t *day);
 void ui_gps_get_time(uint8_t *hour, uint8_t *minute, uint8_t *second);

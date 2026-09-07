@@ -79,14 +79,75 @@ void gps_task_create(void)
     // vTaskSuspend(gps_handle);
 }
 
+/* Guarded, because gps_handle is only set once gps_init() has got as far as
+ * creating the task - and vTaskSuspend(NULL) suspends the *calling* task, so
+ * asking to pause a GPS that never started would have stopped the UI instead. */
 void gps_task_suspend(void)
 {
-    vTaskSuspend(gps_handle);
+    if(gps_handle) vTaskSuspend(gps_handle);
 }
 
 void gps_task_resume(void)
 {
-    vTaskResume(gps_handle);
+    if(gps_handle) vTaskResume(gps_handle);
+}
+
+/* Restarts the receiver from nothing.
+ *
+ * A cold start rather than a nudge: the almanac, the ephemeris and the last
+ * known position all go. That is the point of a reset - a receiver that is
+ * confused about where it is will go on being confused if you leave it what it
+ * thinks it knows - but it also means the next fix takes minutes rather than
+ * seconds, because everything has to be downloaded from the satellites again.
+ *
+ * The GPS task is the only other user of the serial port, so it is paused for
+ * the duration rather than raced with. This blocks its caller for over a
+ * second, which is acceptable for something behind a button and would not be
+ * anywhere else.
+ */
+bool gps_reset(void)
+{
+    if(gps_handle == NULL) {
+        Serial.println("[GPS] not running, so there is nothing to reset");
+        return false;
+    }
+
+    gps_task_suspend();
+
+    /* UBX-CFG-RST: clear everything in battery-backed RAM, controlled software
+     * reset. Not acknowledged - by the time it would answer it has restarted -
+     * so there is nothing to wait for but the receiver coming back. */
+    const uint8_t cfg_rst[] = {
+        0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x01, 0x00, 0x0D, 0x5F
+    };
+    SerialGPS.write(cfg_rst, sizeof(cfg_rst));
+    delay(1200);
+
+    // Forget the last fix as well, or the screen goes on showing a position
+    // from before the reset as though it were current.
+    gps_lat = gps_lng = gps_altitude = gps_speed = 0;
+    gps_year = 0;
+    gps_month = gps_day = 0;
+    gps_hour = gps_minute = gps_second = 0;
+    gps_vsat = 0;
+
+    // The same two-baud dance gps_init() does, since a reset receiver comes back
+    // at whatever its defaults are rather than at whatever it was set to.
+    while(SerialGPS.available()) SerialGPS.read();
+
+    bool ok = GPS_Recovery();
+    if(!ok) {
+        SerialGPS.updateBaudRate(9600);
+        ok = GPS_Recovery();
+        SerialGPS.updateBaudRate(38400);
+        if(ok) ok = GPS_Recovery();
+    }
+
+    gps_task_resume();
+
+    Serial.printf("[GPS] reset %s\n", ok ? "done; a first fix will take a few minutes"
+                                          : "failed, the receiver did not answer");
+    return ok;
 }
 
 void gps_get_coord(double *lat, double *lng)

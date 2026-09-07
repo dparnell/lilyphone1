@@ -163,6 +163,10 @@ void ui_gps_task_resume(void)
 {
     gps_task_resume();
 }
+bool ui_gps_reset(void)
+{
+    return gps_reset();
+}
 void ui_gps_get_coord(double *lat, double *lng)
 {
     gps_get_coord(lat, lng);
