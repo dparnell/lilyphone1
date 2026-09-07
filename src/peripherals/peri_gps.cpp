@@ -207,94 +207,68 @@ void gps_get_speed(double *speed)
 }
 
 /* clang-format on */
+/* Called for every completed sentence.
+ *
+ * The values it caches feed the GPS screen and the clock, so they follow every
+ * sentence - but the logging does not. A u-blox emits several sentences per
+ * navigation epoch, so this ran twenty-odd serial writes several times a
+ * second, from the highest priority task in the firmware, over a USB link that
+ * blocks when the host is not reading. A task blocked on logging is a task not
+ * reading the receiver, and NMEA that is not read in time is NMEA lost - so the
+ * report is one line a second regardless of how much arrives.
+ */
 void displayInfo()
 {
-    Serial.print(F("Location: "));
-    if (gps.location.isValid())
-    {
+    if (gps.location.isValid()) {
         gps_lat = gps.location.lat();
         gps_lng = gps.location.lng();
-        Serial.print(gps_lat, 6);
-        Serial.print(F(","));
-        Serial.print(gps_lng, 6);
-    }
-    else
-    {
-        Serial.print(F("INVALID"));
     }
 
-    Serial.print(F("  Date/Time: "));
-    if (gps.date.isValid())
-    {
-        gps_year = gps.date.year();
+    if (gps.date.isValid()) {
+        gps_year  = gps.date.year();
         gps_month = gps.date.month();
-        gps_day = gps.date.day();
-        Serial.print(gps_month);
-        Serial.print(F("/"));
-        Serial.print(gps_day);
-        Serial.print(F("/"));
-        Serial.print(gps_year);
-
-
-    }
-    else
-    {
-        Serial.print(F("INVALID"));
+        gps_day   = gps.date.day();
     }
 
-    Serial.print(F(" "));
-    if (gps.time.isValid())
-    {
-        gps_hour = gps.time.hour();
+    if (gps.time.isValid()) {
+        gps_hour   = gps.time.hour();
         gps_minute = gps.time.minute();
         gps_second = gps.time.second();
 
-        if (gps_hour < 10)
-            Serial.print(F("0"));
-        Serial.print(gps_hour);
-        Serial.print(F(":"));
-        if (gps_minute < 10)
-            Serial.print(F("0"));
-        Serial.print(gps_minute);
-        Serial.print(F(":"));
-        if (gps_second < 10)
-            Serial.print(F("0"));
-        Serial.print(gps_second);
-        Serial.print(F("."));
-
-        if(!updated_time_from_gps) {
-            // Satellite time is UTC. It goes through system_clock rather than
-            // mktime() because mktime reads its input as local time, and the
-            // modem may have put a real time zone in force by now.
-            if(system_clock_set_utc(CLOCK_SRC_GPS, gps_year, gps_month, gps_day,
-                                    gps_hour, gps_minute, gps_second)) {
+        if (!updated_time_from_gps && gps.date.isValid()) {
+            /* Satellite time is UTC. It goes through system_clock rather than
+             * mktime() because mktime reads its input as local time, and the
+             * modem may have put a real time zone in force by now. */
+            if (system_clock_set_utc(CLOCK_SRC_GPS, gps_year, gps_month, gps_day,
+                                     gps_hour, gps_minute, gps_second)) {
                 updated_time_from_gps = true;
+                Serial.println("[GPS] clock set from satellite time");
             }
         }
     }
-    else
-    {
-        Serial.print(F("INVALID"));
-    }
 
-    Serial.print(F("  Satellites: "));
-    if(gps.satellites.isValid())
-    {
-        gps_vsat = gps.satellites.value();
-        Serial.print(gps_vsat);
-        Serial.print(F(" "));
-    }
+    if (gps.satellites.isValid()) gps_vsat  = gps.satellites.value();
+    if (gps.speed.isValid())      gps_speed = gps.speed.kmph();
 
-    Serial.print(F("  Speed: "));
-    if(gps.speed.isValid())
-    {
-        gps_speed = gps.speed.kmph();
-        Serial.print(gps_speed);
-        Serial.print(F(" "));
-    }
+    static uint32_t next_log = 0;
+    if (millis() < next_log) return;
+    next_log = millis() + 1000;
 
-    Serial.println();
+    if (gps.location.isValid()) {
+        Serial.printf("[GPS] %.6f, %.6f  %u sats  %.1f kmph  %02u:%02u:%02u\n",
+                      gps_lat, gps_lng, (unsigned)gps_vsat, gps_speed,
+                      gps_hour, gps_minute, gps_second);
+    } else {
+        /* Time without a position is the ordinary way to have no fix: the
+         * receiver has decoded the clock off a satellite it can hear but cannot
+         * hear the four it needs to place itself. Indoors, that can go on
+         * indefinitely. */
+        Serial.printf("[GPS] no fix yet, %u sats, %s\n", (unsigned)gps_vsat,
+                      gps.time.isValid() ? "but satellite time is being received"
+                                         : "and no satellite time either");
+    }
 }
+
 /* clang-format off */
 
 bool setupGPS()
