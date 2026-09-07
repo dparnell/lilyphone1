@@ -195,8 +195,9 @@ whatever this node has not heard from yet.
 
 The node reports protocol version 7 and answers anything newer with "unsupported
 command" rather than going quiet. Everything a conversation needs is there —
-contacts, messages, channels, radio settings, device time, adverts — while
-custom variables, statistics, telemetry, signing and flood scoping are not.
+contacts, messages, channels, radio settings, device time, adverts, advert
+paths, flood scope, and signing data with the node's key — while custom
+variables, statistics and telemetry are not.
 
 **Starting up.** Bringing this board up takes several seconds, most of it the
 modem, and the panel used to show one static word for the whole wait — which

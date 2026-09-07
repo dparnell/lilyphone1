@@ -86,6 +86,9 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
 #define CMD_GET_CONTACT_BY_KEY     30
 #define CMD_GET_CHANNEL            31
 #define CMD_SET_CHANNEL            32
+#define CMD_SIGN_START             33
+#define CMD_SIGN_DATA              34
+#define CMD_SIGN_FINISH            35
 #define CMD_SET_OTHER_PARAMS       38
 #define CMD_GET_ADVERT_PATH        42
 #define CMD_GET_TUNING_PARAMS      43
@@ -110,6 +113,8 @@ extern "C" uint16_t ui_battery_27220_get_voltage(void);
 #define RESP_CODE_CONTACT_MSG_RECV_V3 16
 #define RESP_CODE_CHANNEL_MSG_RECV_V3 17
 #define RESP_CODE_CHANNEL_INFO        18
+#define RESP_CODE_SIGN_START          19
+#define RESP_CODE_SIGNATURE           20
 #define RESP_CODE_ADVERT_PATH         22
 #define RESP_CODE_TUNING_PARAMS       23
 #define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
@@ -178,6 +183,28 @@ struct ack_wait_t {
 };
 static ack_wait_t ack_table[ACK_TABLE_SIZE];
 static int        next_ack_idx = 0;
+
+/* Data the app is having signed with this node's key.
+ *
+ * The app hands it over in frame-sized pieces, so it has to be accumulated
+ * before any of it can be signed - a signature covers the whole message or it
+ * is worth nothing. Eight kilobytes is what the protocol advertises as the
+ * limit, and it lives in PSRAM: it is large, held only for the length of one
+ * exchange, and internal memory on this board is spoken for.
+ */
+#define MAX_SIGN_DATA_LEN (8 * 1024)
+
+static uint8_t  *sign_data     = NULL;
+static uint32_t  sign_data_len = 0;
+
+static void sign_release(void)
+{
+    if(sign_data == NULL) return;
+
+    free(sign_data);
+    sign_data     = NULL;
+    sign_data_len = 0;
+}
 
 /* Where the last advert from each node arrived over.
  *
@@ -618,6 +645,7 @@ static void handle_frame(int len)
         // cmd_frame[1..7] are reserved; the app's name follows.
         Serial.printf("[LINK] app \"%s\" connected\n", (const char *)&cmd_frame[8]);
         iter_running = false;   // abandon any listing the last app left running
+        sign_release();         // and any signing it walked away from
 
         mesh_radio_t radio;
         mesh_net_get_radio(&radio);
@@ -898,6 +926,48 @@ static void handle_frame(int len)
         } else {
             mesh_net_set_tx_power(power);
             write_ok();
+        }
+
+    } else if(cmd == CMD_SIGN_START) {
+        /* The app is about to send something to sign. The reply says how much
+         * this node will take, so it can split the message accordingly. */
+        sign_release();
+
+        sign_data = (uint8_t *)ps_malloc(MAX_SIGN_DATA_LEN);
+        if(sign_data == NULL) sign_data = (uint8_t *)malloc(MAX_SIGN_DATA_LEN);
+
+        if(sign_data == NULL) {
+            write_err(ERR_CODE_TABLE_FULL);
+        } else {
+            uint32_t max_len = MAX_SIGN_DATA_LEN;
+
+            out_frame[0] = RESP_CODE_SIGN_START;
+            out_frame[1] = 0;   // reserved
+            memcpy(&out_frame[2], &max_len, 4);
+            write_frame(out_frame, 6);
+        }
+
+    } else if(cmd == CMD_SIGN_DATA && len > 1) {
+        if(sign_data == NULL) {
+            write_err(ERR_CODE_BAD_STATE);          // no CMD_SIGN_START first
+        } else if(sign_data_len + (len - 1) > MAX_SIGN_DATA_LEN) {
+            write_err(ERR_CODE_TABLE_FULL);
+        } else {
+            memcpy(&sign_data[sign_data_len], &cmd_frame[1], len - 1);
+            sign_data_len += (len - 1);
+            write_ok();
+        }
+
+    } else if(cmd == CMD_SIGN_FINISH) {
+        if(sign_data == NULL) {
+            write_err(ERR_CODE_BAD_STATE);
+        } else {
+            out_frame[0] = RESP_CODE_SIGNATURE;
+            chat_mesh->self_id.sign(&out_frame[1], sign_data, sign_data_len);
+            write_frame(out_frame, 1 + SIGNATURE_SIZE);
+
+            Serial.printf("[LINK] signed %u bytes for the app\n", (unsigned)sign_data_len);
+            sign_release();
         }
 
     } else if(cmd == CMD_GET_ADVERT_PATH && len >= PUB_KEY_SIZE + 2) {
