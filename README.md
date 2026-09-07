@@ -257,6 +257,21 @@ almanac, its ephemeris and its last known position - which is what to reach for
 when it has got itself confused, at the cost of a first fix that takes minutes
 rather than seconds.
 
+**Storage.** *Settings > Storage* browses both filesystems. They are nothing
+alike: internal flash is soldered on, holds the contacts, the messages and the
+mesh identity, and cannot be read anywhere else; the SD card can be taken out
+and put in a computer. Folders open, files show their size, and tapping one
+shows the start of it — enough to confirm a file holds what it should. It is
+read only on purpose: a browser that can delete is one wrong tap from losing the
+contacts, and a phone has no undo.
+
+*Export to card* writes the contacts and the whole message log to
+`/lilyphone` on the SD card as CSV, under a name stamped with the time so an
+export never overwrites an earlier one. CSV rather than the TSV kept internally,
+because the point is that a spreadsheet opens it — message bodies keep the
+sender's line breaks, safely inside the quotes. Mesh messages are not included;
+they only ever exist in memory.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 

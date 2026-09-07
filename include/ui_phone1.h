@@ -61,6 +61,8 @@ enum {
     SCREEN15_ID,   // lock screen
     SCREEN16_ID,   // hotspot: wifi access point relaying UDP over cellular
     SCREEN16_1_ID, // one hotspot setting at a time
+    SCREEN17_ID,   // storage: what is on the two filesystems
+    SCREEN17_1_ID, // the start of one file
 };
 
 /* Why the contacts list was opened. When it is a pick the list hands a number

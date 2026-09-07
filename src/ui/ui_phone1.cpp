@@ -9,6 +9,9 @@
 #include "udp_relay.h"
 #include "mesh_net.h"
 #include "mesh_companion.h"
+#include "store_export.h"
+#include <SD.h>
+#include <SPIFFS.h>
 #include "Arduino.h"
 
 #define SETTING_PAGE_MAX_ITEM 7
@@ -2145,6 +2148,7 @@ static ui_setting_handle setting_handle_list[] = {
     {.name = "Power Lora",       .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_lora_status,  .get_cb = ui_setting_get_lora_status},
     {.name = "Power Gyro",       .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gyro_status,  .get_cb = ui_setting_get_gyro_status},
     {.name = "Power A7682",      .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_a7682_status, .get_cb = ui_setting_get_a7682_status},
+    {.name = "Storage",          .icon = LV_SYMBOL_SD_CARD,  .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN17_ID},
     {.name = "About System",     .icon = LV_SYMBOL_FILE,     .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_2_ID},
 };
 
@@ -4885,6 +4889,324 @@ static scr_lifecycle_t screen13_2 = {
 };
 #endif
 
+//************************************[ screen 17 ]***************************************** storage
+#if 1
+/* What is actually on the two filesystems.
+ *
+ * There are two, and they are nothing alike. SPIFFS is soldered on, holds the
+ * contacts, the messages and the mesh identity, and cannot be read anywhere
+ * else. The SD card can be taken out and put in a computer, and until the
+ * export button below existed, nothing on this phone ever wrote to it.
+ *
+ * Read only, deliberately. A browser that can delete is one wrong tap from
+ * losing the contacts file, and there is no undo on a phone.
+ */
+#define SCR17_PATH_MAX 96
+
+enum {
+    SCR17_ROOTS = 0,   // the two filesystems
+    SCR17_FLASH,
+    SCR17_CARD,
+};
+
+static lv_obj_t *scr17_list = NULL;
+static int       scr17_where = SCR17_ROOTS;
+static char      scr17_path[SCR17_PATH_MAX] = "/";
+
+// The file screen below reads these.
+static char      scr17_file_path[SCR17_PATH_MAX] = "";
+static bool      scr17_file_on_card = false;
+
+static void scr17_populate(void);
+
+static fs::FS *scr17_fs(void)
+{
+    if(scr17_where == SCR17_CARD)  return &SD;
+    if(scr17_where == SCR17_FLASH) return &SPIFFS;
+    return NULL;
+}
+
+/* Sizes as a person would say them, since a file listing full of raw byte
+ * counts is a listing nobody reads. */
+static void scr17_size_text(size_t bytes, char *buf, int len)
+{
+    if(bytes < 1024)              lv_snprintf(buf, len, "%u B", (unsigned)bytes);
+    else if(bytes < 1024 * 1024)  lv_snprintf(buf, len, "%.1f KB", bytes / 1024.0);
+    else                          lv_snprintf(buf, len, "%.1f MB", bytes / (1024.0 * 1024.0));
+}
+
+static void scr17_back_event(lv_event_t *e)
+{
+    if(e->code != LV_EVENT_CLICKED) return;
+
+    /* Up a level rather than out of the screen, until there is nowhere left to
+     * go up to - which is what the back arrow means everywhere else in a file
+     * browser, and what a hardware back button has to do here too. */
+    if(scr17_where == SCR17_ROOTS) {
+        scr_mgr_pop(false);
+        return;
+    }
+
+    if(strcmp(scr17_path, "/") != 0) {
+        char *slash = strrchr(scr17_path, '/');
+        if(slash && slash != scr17_path) *slash = '\0';
+        else                             lv_snprintf(scr17_path, sizeof(scr17_path), "/");
+    } else {
+        scr17_where = SCR17_ROOTS;
+    }
+
+    scr17_populate();
+    ui_disp_full_refr();
+}
+
+static void scr17_root_event(lv_event_t *e)
+{
+    scr17_where = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_snprintf(scr17_path, sizeof(scr17_path), "/");
+
+    scr17_populate();
+    ui_disp_full_refr();
+}
+
+static void scr17_dir_event(lv_event_t *e)
+{
+    const char *name = (const char *)lv_event_get_user_data(e);
+    if(name == NULL) return;
+
+    if(strcmp(scr17_path, "/") == 0) lv_snprintf(scr17_path, sizeof(scr17_path), "/%s", name);
+    else {
+        char parent[SCR17_PATH_MAX];
+        lv_snprintf(parent, sizeof(parent), "%s", scr17_path);
+        lv_snprintf(scr17_path, sizeof(scr17_path), "%s/%s", parent, name);
+    }
+
+    scr17_populate();
+    ui_disp_full_refr();
+}
+
+static void scr17_file_event(lv_event_t *e)
+{
+    const char *name = (const char *)lv_event_get_user_data(e);
+    if(name == NULL) return;
+
+    if(strcmp(scr17_path, "/") == 0) lv_snprintf(scr17_file_path, sizeof(scr17_file_path), "/%s", name);
+    else lv_snprintf(scr17_file_path, sizeof(scr17_file_path), "%s/%s", scr17_path, name);
+
+    scr17_file_on_card = (scr17_where == SCR17_CARD);
+    scr_mgr_push(SCREEN17_1_ID, false);
+}
+
+static void scr17_export_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    char detail[STORE_EXPORT_DETAIL];
+    bool ok = store_export_to_sd(detail, sizeof(detail));
+
+    ui_notice(ok ? "Exported" : "Export failed", detail);
+
+    // Whatever was just written should be visible without going back and in.
+    if(ok && scr17_where == SCR17_CARD) scr17_populate();
+}
+
+/* Names outlive the callback that reads them, so the list keeps its own copies
+ * rather than pointing into a File object that is long gone. */
+#define SCR17_NAMES_MAX 40
+static char scr17_names[SCR17_NAMES_MAX][40];
+
+static void scr17_populate(void)
+{
+    char detail[48];
+    char size[24];
+
+    lv_obj_clean(scr17_list);
+
+    if(scr17_where == SCR17_ROOTS) {
+        lv_snprintf(detail, sizeof(detail), "%.1f KB of %.1f MB used",
+                    SPIFFS.usedBytes() / 1024.0, SPIFFS.totalBytes() / (1024.0 * 1024.0));
+        scr_row_create(scr17_list, "Internal flash", detail, NULL,
+                       scr17_root_event, (void *)(intptr_t)SCR17_FLASH);
+
+        if(ui_test_sd_card()) {
+            lv_snprintf(detail, sizeof(detail), "%.0f MB of %.0f MB used",
+                        SD.usedBytes() / (1024.0 * 1024.0),
+                        SD.totalBytes() / (1024.0 * 1024.0));
+        } else {
+            lv_snprintf(detail, sizeof(detail), "not present");
+        }
+        scr_row_create(scr17_list, "SD card", detail, NULL,
+                       scr17_root_event, (void *)(intptr_t)SCR17_CARD);
+        return;
+    }
+
+    fs::FS *fs = scr17_fs();
+    if(fs == NULL || (scr17_where == SCR17_CARD && !ui_test_sd_card())) {
+        scr_empty_note_create(scr17_list, "No card in the slot.");
+        return;
+    }
+
+    File dir = fs->open(scr17_path);
+    if(!dir || !dir.isDirectory()) {
+        scr_empty_note_create(scr17_list, "Nothing here.");
+        return;
+    }
+
+    int n = 0;
+    File entry = dir.openNextFile();
+    while(entry && n < SCR17_NAMES_MAX) {
+        const char *full = entry.name();
+
+        /* SPIFFS hands back a full path where SD hands back a bare name, so
+         * take whatever follows the last slash and treat both the same. */
+        const char *name  = strrchr(full, '/');
+        name = name ? name + 1 : full;
+
+        snprintf(scr17_names[n], sizeof(scr17_names[n]), "%s", name);
+
+        if(entry.isDirectory()) {
+            scr_row_create(scr17_list, scr17_names[n], "folder", LV_SYMBOL_RIGHT,
+                           scr17_dir_event, scr17_names[n]);
+        } else {
+            scr17_size_text(entry.size(), size, sizeof(size));
+            scr_row_create(scr17_list, scr17_names[n], size, NULL,
+                           scr17_file_event, scr17_names[n]);
+        }
+
+        n++;
+        entry = dir.openNextFile();
+    }
+
+    if(n == 0) scr_empty_note_create(scr17_list, "Empty.");
+}
+
+static void create17(lv_obj_t *parent)
+{
+    scr17_list = scr_app_list_create(parent);
+    lv_obj_set_size(scr17_list, lv_pct(96), LV_VER_RES - 36 - 44);
+    lv_obj_align(scr17_list, LV_ALIGN_TOP_MID, 0, 34);
+
+    scr17_populate();
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_SAVE "  Export to card", 220,
+                       scr17_export_event, NULL);
+
+    scr_back_btn_create(parent, "Storage", scr17_back_event);
+}
+
+static void entry17(void)
+{
+    scr17_populate();
+    ui_disp_full_refr();
+}
+
+static void exit17(void) { ui_disp_full_refr(); }
+
+static void destroy17(void) { scr17_list = NULL; }
+
+static scr_lifecycle_t screen17 = {
+    .create = create17,
+    .entry = entry17,
+    .exit  = exit17,
+    .destroy = destroy17,
+};
+#endif
+// --------------------- screen 17.1 --------------------- one file
+#if 1
+/* The first part of a file, for confirming it holds what it should.
+ *
+ * Only the beginning: a message log runs to tens of kilobytes, this panel draws
+ * a screenful in a few hundred milliseconds, and nobody reads a phone's flash
+ * from end to end on a 240 pixel screen. What it is for is answering "did the
+ * export work" and "is that really what is in there".
+ */
+#define SCR17_1_PREVIEW 900
+
+static void scr17_1_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void create17_1(lv_obj_t *parent)
+{
+    fs::FS *fs = scr17_file_on_card ? (fs::FS *)&SD : (fs::FS *)&SPIFFS;
+
+    char *text = (char *)lv_mem_alloc(SCR17_1_PREVIEW + 1);
+    if(text) text[0] = '\0';
+
+    size_t total = 0;
+    File   f     = fs->open(scr17_file_path);
+
+    if(f && text) {
+        total = f.size();
+
+        size_t want = total < SCR17_1_PREVIEW ? total : SCR17_1_PREVIEW;
+        size_t got  = f.readBytes(text, want);
+        text[got]   = '\0';
+
+        /* A binary file rendered as text is a screenful of placeholder boxes,
+         * so say what it is instead of pretending to show it. */
+        for(size_t i = 0; i < got; i++) {
+            if(text[i] == '\0' || (text[i] < 0x09 && text[i] > 0)) {
+                snprintf(text, SCR17_1_PREVIEW, "Not a text file.");
+                break;
+            }
+        }
+    } else if(text) {
+        snprintf(text, SCR17_1_PREVIEW, "Could not open it.");
+    }
+    if(f) f.close();
+
+    char header[64];
+    scr17_size_text(total, header, sizeof(header));
+
+    lv_obj_t *size_lab = lv_label_create(parent);
+    lv_obj_set_width(size_lab, lv_pct(94));
+    lv_obj_set_height(size_lab, 16);
+    lv_obj_set_style_text_font(size_lab, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(size_lab, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(size_lab, LV_LABEL_LONG_DOT);
+    lv_label_set_text_fmt(size_lab, "%s%s", header,
+                          total > SCR17_1_PREVIEW ? "  (start of file)" : "");
+    lv_obj_align(size_lab, LV_ALIGN_TOP_MID, 0, 34);
+
+    lv_obj_t *body = lv_obj_create(parent);
+    lv_obj_set_size(body, lv_pct(96), LV_VER_RES - 58);
+    lv_obj_align(body, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_style_bg_color(body, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(body, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(body, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(body, 4, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_OFF);
+    scr_scroll_for_epaper(body);
+
+    lv_obj_t *lab = lv_label_create(body);
+    lv_obj_set_width(lab, lv_pct(100));
+    lv_obj_set_style_text_font(lab, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lab, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(lab, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(lab, text ? text : "Out of memory.");
+
+    if(text) lv_mem_free(text);
+
+    // Just the file's own name in the title, since the path is how we got here.
+    const char *name = strrchr(scr17_file_path, '/');
+    scr_back_btn_create(parent, name ? name + 1 : scr17_file_path, scr17_1_back_event);
+}
+
+static void entry17_1(void) { ui_disp_full_refr(); }
+static void exit17_1(void)  { ui_disp_full_refr(); }
+static void destroy17_1(void) { }
+
+static scr_lifecycle_t screen17_1 = {
+    .create = create17_1,
+    .entry = entry17_1,
+    .exit  = exit17_1,
+    .destroy = destroy17_1,
+};
+#endif
+
 //************************************[ screen 9 ]****************************************** Shutdown
 #if 1
 static lv_timer_t *shutdown_timer = NULL;
@@ -6090,7 +6412,9 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN14_ID,   &screen14);     // Quick settings
     scr_mgr_register(SCREEN15_ID,   &screen15);     // Lock screen
     scr_mgr_register(SCREEN16_ID,   &screen16);     // Hotspot
-    scr_mgr_register(SCREEN16_1_ID, &screen16_1);   //  - one setting
+    scr_mgr_register(SCREEN16_1_ID, &screen16_1);
+    scr_mgr_register(SCREEN17_ID,   &screen17);    // storage
+    scr_mgr_register(SCREEN17_1_ID, &screen17_1);  //  - one file   //  - one setting
     
 
     scr_mgr_switch(SCREEN0_ID, false); // set root screen

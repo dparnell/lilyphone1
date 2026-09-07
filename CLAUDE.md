@@ -213,6 +213,14 @@ The board adapter, radio settings, advertisement handling and the chat engine ar
 
 Numbers are compared by `phone_number_match()` (last 7 digits, digits only), so `+61412345678` / `0412345678` / `412345678` are one contact. Conversations are derived from the log on demand, not stored, so any thread index is only valid until the log changes.
 
+### Storage browser and export
+
+`src/apps/store_export.cpp` is the only thing in the firmware that writes to the SD card; everything else the phone keeps lives in SPIFFS. Both filesystems are `fs::FS`, which is what lets screen 17 walk either through one pointer - but they differ in one way that matters: **SPIFFS `File::name()` returns a full path where SD returns a bare name**, so the browser takes whatever follows the last slash and treats both alike.
+
+The browser is read only by choice. It also keeps its own copies of the names it lists (`scr17_names`), because a row's callback fires long after the `File` it came from has gone out of scope.
+
+The UI must not read `peri_init_st` directly - `ui_test_sd_card()` in the port is there for it. `ui_phone1.cpp` does not include `peripheral.h` and should not start.
+
 ### GPS
 
 The receiver is a u-blox M10 on `Serial2` at 38400 baud, pins 43/44. Two things about it surprise people:
