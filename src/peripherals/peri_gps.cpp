@@ -29,6 +29,14 @@ bool gps_init(void)
     // result = setupGPS();
     if(!result) {
         // Set u-blox m10q gps baudrate 38400
+        /* Four times the default receive buffer, because the cost of running
+         * out is silent corruption rather than an error: NMEA arrives
+         * continuously at 38400 baud, and a couple of hundred bytes is only
+         * about sixty milliseconds of it. Anything that keeps this task off the
+         * CPU for longer - and a Bluetooth stack servicing connection events
+         * is exactly that sort of thing - loses bytes out of the middle of
+         * sentences, which then fail their checksums and are thrown away. */
+        SerialGPS.setRxBufferSize(1024);
         SerialGPS.begin(38400, SERIAL_8N1, BOARD_GPS_RXD, BOARD_GPS_TXD);
         result = GPS_Recovery();
         if (!result) {
@@ -69,6 +77,24 @@ void gps_task(void *param)
             Serial.println(F("No GPS detected: check wiring."));
             delay(1000);
         }
+
+        /* Every so often, enough to tell the ways this fails apart.
+         *
+         * No characters at all is a receiver that has stopped or lost power.
+         * Characters arriving but checksums failing is data being dropped
+         * before it is read - the receiver is fine and something else is
+         * holding the CPU. Both counts healthy with no satellites is simply a
+         * receiver that cannot see the sky, and nothing to do with the
+         * firmware at all. */
+        static uint32_t next_report = 0;
+        if (millis() > next_report) {
+            next_report = millis() + 10000;
+
+            Serial.printf("[GPS] %u chars, %u good sentences, %u bad checksums, %u sats\n",
+                          (unsigned)gps.charsProcessed(), (unsigned)gps.passedChecksum(),
+                          (unsigned)gps.failedChecksum(), (unsigned)gps_vsat);
+        }
+
         delay(1);
     }
 }

@@ -213,6 +213,15 @@ The board adapter, radio settings, advertisement handling and the chat engine ar
 
 Numbers are compared by `phone_number_match()` (last 7 digits, digits only), so `+61412345678` / `0412345678` / `412345678` are one contact. Conversations are derived from the log on demand, not stored, so any thread index is only valid until the log changes.
 
+### GPS
+
+The receiver is a u-blox M10 on `Serial2` at 38400 baud, pins 43/44. Two things about it surprise people:
+
+- **The GPS task only runs while the GPS screen is open.** `entry3` resumes it and `exit3` suspends it, which is the vendor's design. Nothing else in the firmware sees GPS data, including the clock, unless that screen is showing.
+- **Losing bytes is silent.** NMEA arrives continuously, so a task kept off the CPU for longer than the receive buffer holds - the default 256 bytes is about 60ms at this rate - loses bytes out of the middle of sentences, which then fail their checksums and are discarded. The symptom is "no fix", not an error. The buffer is therefore 1024 bytes, and `gps_task` reports characters, good sentences, failed checksums and satellite count every ten seconds, which is what tells a starved task apart from a receiver that has stopped and from one that simply cannot see the sky.
+
+`gps_reset()` cold starts the receiver: `UBX-CFG-RST` clearing battery-backed RAM, then `GPS_Recovery()` again because a restarted receiver comes back at its defaults. It pauses the GPS task first, since that task is the only other user of the port.
+
 ### Ear detect
 
 `ui_proximity_tick()` in `ui_phone1_port.cpp` polls the LTR-553ALS proximity channel from a 250ms LVGL timer and sets a flag that `touchpad_read()` in `main.cpp` acts on — that input driver is the only place that can suppress touch, so it is the only place that does.
