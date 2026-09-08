@@ -979,8 +979,9 @@ static void scr1_1_populate(void)
     if(mesh_net_get_loc_policy() == MESH_LOC_OFF) {
         lv_snprintf(value, sizeof(value), "Off");
     } else if(mesh_net_get_position(&lat, &lon)) {
-        lv_snprintf(value, sizeof(value), "%s  %.4f, %.4f",
-                    mesh_net_loc_policy_name(), lat, lon);
+        lv_snprintf(value, sizeof(value), "%s  %.4f, %.4f%s",
+                    mesh_net_loc_policy_name(), lat, lon,
+                    mesh_net_position_is_fixed() ? " (set)" : "");
     } else {
         lv_snprintf(value, sizeof(value), "%s  (no fix yet)", mesh_net_loc_policy_name());
     }

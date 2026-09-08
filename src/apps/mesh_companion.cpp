@@ -662,8 +662,13 @@ static void handle_frame(int len)
         int32_t lat = 0, lon = 0;
         double  dlat, dlon;
 
+        /* Reported whether or not it is being advertised. This goes to the one
+         * app on the other end of a paired link, not to the mesh, and an app
+         * that cannot read back the position it just set has no way to tell
+         * whether it worked. Whether it reaches an advert is what the policy
+         * byte below says. */
         bool sharing = mesh_net_get_loc_policy() != MESH_LOC_OFF;
-        if(sharing && mesh_net_get_position(&dlat, &dlon)) {
+        if(mesh_net_get_position(&dlat, &dlon)) {
             lat = (int32_t)(dlat * 1000000.0);
             lon = (int32_t)(dlon * 1000000.0);
         }
@@ -895,12 +900,20 @@ static void handle_frame(int len)
         mesh_net_set_self_name(name);
         write_ok();
 
-    } else if(cmd == CMD_SET_ADVERT_LATLON) {
-        /* Accepted and ignored. This node's position comes from its own GPS, so
-         * there is nothing for the app to set - and refusing stops some apps
-         * part way through connecting. What it asked for is not what gets
-         * shared, but SELF_INFO tells it the truth either way. */
-        write_ok();
+    } else if(cmd == CMD_SET_ADVERT_LATLON && len >= 9) {
+        /* Where the node is, for a map. Sent in millionths of a degree, and
+         * kept as a position to fall back on whenever the GPS has no fix -
+         * which, for a device that lives indoors, is most of the time. */
+        int32_t lat, lon;
+        memcpy(&lat, &cmd_frame[1], 4);
+        memcpy(&lon, &cmd_frame[5], 4);
+
+        if(lat > 90000000 || lat < -90000000 || lon > 180000000 || lon < -180000000) {
+            write_err(ERR_CODE_ILLEGAL_ARG);
+        } else {
+            mesh_net_set_fixed_position(lat / 1000000.0, lon / 1000000.0);
+            write_ok();
+        }
 
     } else if(cmd == CMD_SET_RADIO_PARAMS && len >= 11) {
         uint32_t freq_khz, bw_hz;

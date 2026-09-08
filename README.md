@@ -116,9 +116,17 @@ mesh, gets relayed well past radio range and is readable by anyone running
 MeshCore, so sharing because you meant to is a different thing from sharing
 because a timer went off in your pocket.
 
-The position comes from the phone's own GPS. Without a fix nothing is shared
-whatever the setting says, and the row shows *(no fix yet)* rather than implying
-otherwise; announcing by hand in that state says so too. Nodes you hear carry
+The position comes from the phone's own GPS, or — when there is no fix — from
+one set by hand. A companion app can set it, which is what putting the node on
+the MeshCore map needs: a device that lives indoors may never see the sky, and a
+fix it cannot get is not a location it can share. A live fix always wins, so a
+phone that has moved says where it is rather than where it was put, and the
+Share location row marks a given position *(set)*.
+
+Setting a position turns sharing on if it was off, because a position handed
+over for adverts that never reaches one is no use to anybody. With neither a fix
+nor a set position, nothing is shared whatever the setting says, the row shows
+*(no fix yet)*, and announcing by hand says so too. Nodes you hear carry
 their own position when they choose to share it, and that reaches a companion
 app whether or not you share yours — so you can see others without being seen.
 

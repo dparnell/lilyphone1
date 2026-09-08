@@ -116,9 +116,19 @@ int         mesh_net_get_loc_policy(void);
 void        mesh_net_set_loc_policy(int policy);
 const char *mesh_net_loc_policy_name(void);
 
-/* The position that would be shared. False when the GPS has no fix, in which
- * case nothing is shared whatever the policy says. */
+/* The position that would be shared: the GPS fix if there is one, otherwise a
+ * position set by hand. False when there is neither, in which case nothing is
+ * shared whatever the policy says. */
 bool        mesh_net_get_position(double *lat, double *lon);
+/* True when the position above came from being told rather than from the sky,
+ * which is worth showing next to it. */
+bool        mesh_net_position_is_fixed(void);
+
+/* Sets the position by hand, for a node that does not move or cannot see the
+ * sky - which is what putting one on a map needs. Turns sharing on if it was
+ * off, because a position given for adverts that never reaches one is no use
+ * to anybody. Persisted. */
+void        mesh_net_set_fixed_position(double lat, double lon);
 
 /* Transmit power in dBm. The ceiling is the SX1262's, not a legal limit - what
  * is allowed where you are is your business. Persisted. */

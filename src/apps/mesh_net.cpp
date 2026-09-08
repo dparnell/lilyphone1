@@ -60,6 +60,12 @@ static bool   tx_power_pending = false;
  * further than the radio reaches and is readable by anyone running MeshCore. */
 static int    loc_policy = MESH_LOC_OFF;
 
+/* A position given rather than measured. What a node that lives on a shelf
+ * needs in order to appear on a map: its GPS may never see the sky, and a fix
+ * it cannot get is not a location it can share. Zero means none was given. */
+static double fixed_lat = 0.0, fixed_lon = 0.0;
+static bool   pos_from_fixed = false;
+
 /* The presets. The wide ones are what the MeshCore community publishes per
  * region; the narrow one is what the mesh in Victoria actually runs, and the
  * difference is not only the frequency - bandwidth, spreading factor and coding
@@ -494,6 +500,8 @@ static void region_save(void)
     prefs.putUChar("cr", custom_radio.coding_rate);
     prefs.putChar("txpower", tx_power_dbm);
     prefs.putInt("locpol", loc_policy);
+    prefs.putDouble("fixlat", fixed_lat);
+    prefs.putDouble("fixlon", fixed_lon);
     prefs.end();
 }
 
@@ -509,6 +517,8 @@ static void region_load(void)
     custom_radio.coding_rate      = prefs.getUChar("cr", custom_radio.coding_rate);
     tx_power_dbm                  = prefs.getChar("txpower", tx_power_dbm);
     loc_policy                    = prefs.getInt("locpol", loc_policy);
+    fixed_lat                     = prefs.getDouble("fixlat", fixed_lat);
+    fixed_lon                     = prefs.getDouble("fixlon", fixed_lon);
     prefs.end();
 
     if(region_idx < 0 || region_idx >= MESH_REGION_COUNT) region_idx = 0;
@@ -525,11 +535,49 @@ bool mesh_net_get_position(double *lat, double *lon)
      * means it has never had one. Null Island is a fair thing to spend as a
      * sentinel. */
     gps_get_coord(&la, &lo);
-    if(la == 0.0 && lo == 0.0) return false;
+
+    /* A live fix wins, because a phone that has moved should say where it is
+     * now rather than where it was put. Without one, what it was told is far
+     * better than nothing - and on this board, indoors, that is the usual
+     * case. */
+    if(la == 0.0 && lo == 0.0) {
+        if(fixed_lat == 0.0 && fixed_lon == 0.0) return false;
+
+        la = fixed_lat;
+        lo = fixed_lon;
+        pos_from_fixed = true;
+    } else {
+        pos_from_fixed = false;
+    }
 
     if(lat) *lat = la;
     if(lon) *lon = lo;
     return true;
+}
+
+bool mesh_net_position_is_fixed(void)
+{
+    return pos_from_fixed;
+}
+
+void mesh_net_set_fixed_position(double lat, double lon)
+{
+    if(lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) return;
+
+    fixed_lat = lat;
+    fixed_lon = lon;
+
+    /* A position handed over for adverts that never reaches one is no use to
+     * anybody, and asking for it is the whole reason this command exists - so
+     * sharing comes on with it rather than leaving the caller to wonder why
+     * nothing happened. It stays visible and switchable on the device. */
+    if(loc_policy == MESH_LOC_OFF) {
+        loc_policy = MESH_LOC_ALWAYS;
+        Serial.println("[MESH] a position was set, so sharing it is now on");
+    }
+
+    region_save();
+    Serial.printf("[MESH] position set by hand: %.5f, %.5f\n", lat, lon);
 }
 
 int mesh_net_get_loc_policy(void)
