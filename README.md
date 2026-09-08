@@ -117,7 +117,8 @@ MeshCore, so sharing because you meant to is a different thing from sharing
 because a timer went off in your pocket.
 
 The position comes from the phone's own GPS, or — when there is no fix — from
-one set by hand. A companion app can set it, which is what putting the node on
+one set by hand on *This node > Set location*, in degrees, south and west
+negative. A companion app can set it too, which is what putting the node on
 the MeshCore map needs: a device that lives indoors may never see the sky, and a
 fix it cannot get is not a location it can share. A live fix always wins, so a
 phone that has moved says where it is rather than where it was put, and the

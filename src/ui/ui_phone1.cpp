@@ -948,6 +948,12 @@ static void scr1_1_radio_event(lv_event_t *e)
     scr_mgr_push(SCREEN1_2_ID, false);
 }
 
+static void scr1_1_setloc_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr_mgr_push(SCREEN1_8_ID, false);
+}
+
 static void scr1_1_companion_event(lv_event_t *e)
 {
     LV_UNUSED(e);
@@ -986,6 +992,12 @@ static void scr1_1_populate(void)
         lv_snprintf(value, sizeof(value), "%s  (no fix yet)", mesh_net_loc_policy_name());
     }
     scr_row_create(scr1_1_list, "Share location", value, NULL, scr1_1_location_event, NULL);
+
+    /* Separate from the switch above, because how much to share and where the
+     * node actually is are different questions - and the second one has an
+     * answer even when the sky does not. */
+    scr_row_create(scr1_1_list, "Set location", "Type it in", NULL,
+                   scr1_1_setloc_event, NULL);
 
     scr_row_create(scr1_1_list, "Companion app", mesh_companion_link_name(), NULL,
                    scr1_1_companion_event, NULL);
@@ -1775,6 +1787,150 @@ static scr_lifecycle_t screen1_7 = {
     .entry = entry1_7,
     .exit  = exit1_7,
     .destroy = destroy1_7,
+};
+#endif
+
+// --------------------- screen 1.8 --------------------- set the location
+#if 1
+/* Where this node is, typed in.
+ *
+ * The GPS answers this whenever it has a fix, and indoors it may never have
+ * one. A node that lives on a shelf still has a location, and a map still wants
+ * it - so it can be given rather than measured, without a companion app in the
+ * loop and without waiting for the sky.
+ */
+static lv_obj_t *scr1_8_lat = NULL;
+static lv_obj_t *scr1_8_lon = NULL;
+static lv_obj_t *scr1_8_active = NULL;
+
+static void scr1_8_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+/* Which field the keypad types into. Tapping one takes it, which is the only
+ * cue there is on a screen with no cursor to speak of. */
+static void scr1_8_focus_event(lv_event_t *e)
+{
+    scr1_8_active = (lv_obj_t *)lv_event_get_target(e);
+    lv_group_focus_obj(scr1_8_active);
+}
+
+static const char *scr1_8_keypad_map[] = { "1", "2", "3", "\n",
+                                           "4", "5", "6", "\n",
+                                           "7", "8", "9", "\n",
+                                           "-", "0", ".", LV_SYMBOL_BACKSPACE, ""
+                                         };
+
+static void scr1_8_keypad_event(lv_event_t *e)
+{
+    lv_obj_t   *btnm = (lv_obj_t *)lv_event_get_target(e);
+    const char *txt  = lv_btnmatrix_get_btn_text(btnm, lv_btnmatrix_get_selected_btn(btnm));
+
+    if(txt == NULL || scr1_8_active == NULL) return;
+
+    if(strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) lv_textarea_del_char(scr1_8_active);
+    else                                      lv_textarea_add_text(scr1_8_active, txt);
+}
+
+static void scr1_8_save_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    const char *lat_text = lv_textarea_get_text(scr1_8_lat);
+    const char *lon_text = lv_textarea_get_text(scr1_8_lon);
+
+    if(lat_text == NULL || lon_text == NULL || lat_text[0] == '\0' || lon_text[0] == '\0') {
+        ui_notice("Location", "Fill in both, in degrees.\n\nSouth and west are negative.");
+        return;
+    }
+
+    double lat = atof(lat_text);
+    double lon = atof(lon_text);
+
+    /* Checked here as well as in mesh_net, because that call refuses silently -
+     * right for a setting changed by a button, wrong for one typed in. */
+    if(lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) {
+        ui_notice("Location", "Latitude is -90 to 90 and longitude -180 to 180.");
+        return;
+    }
+
+    mesh_net_set_fixed_position(lat, lon);
+    scr_mgr_pop(false);
+}
+
+static void scr1_8_clear_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    lv_textarea_set_text(scr1_8_lat, "");
+    lv_textarea_set_text(scr1_8_lon, "");
+    scr1_8_active = scr1_8_lat;
+    lv_group_focus_obj(scr1_8_lat);
+}
+
+static void create1_8(lv_obj_t *parent)
+{
+    char lat_text[24] = "";
+    char lon_text[24] = "";
+
+    /* Seeded with wherever the node reckons it is, which is the last position
+     * given or a live fix - so correcting one is not retyping it. */
+    double lat, lon;
+    if(mesh_net_get_position(&lat, &lon)) {
+        lv_snprintf(lat_text, sizeof(lat_text), "%.5f", lat);
+        lv_snprintf(lon_text, sizeof(lon_text), "%.5f", lon);
+    }
+
+    scr1_8_lat = scr_field_create(parent, "Latitude", 38, lat_text, 12);
+    scr1_8_lon = scr_field_create(parent, "Longitude", 92, lon_text, 12);
+
+    lv_obj_add_event_cb(scr1_8_lat, scr1_8_focus_event, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(scr1_8_lon, scr1_8_focus_event, LV_EVENT_CLICKED, NULL);
+    scr1_8_active = scr1_8_lat;
+
+    lv_obj_t *hint = lv_label_create(parent);
+    lv_obj_set_width(hint, lv_pct(92));
+    lv_obj_set_style_text_font(hint, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(hint, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(hint, "Degrees. South and west are negative. Tap a field to type "
+                            "into it; a GPS fix overrides this while there is one.");
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 132);
+
+    lv_obj_t *pad = lv_btnmatrix_create(parent);
+    lv_btnmatrix_set_map(pad, scr1_8_keypad_map);
+    lv_obj_set_size(pad, lv_pct(96), 112);
+    lv_obj_set_style_border_width(pad, 0, LV_PART_MAIN);
+    lv_obj_align(pad, LV_ALIGN_BOTTOM_MID, 0, -44);
+    lv_obj_add_event_cb(pad, scr1_8_keypad_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 74, scr1_8_save_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_TRASH "  Clear", 74, scr1_8_clear_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Back", 74, scr1_8_back_event, NULL);
+
+    scr_back_btn_create(parent, "Location", scr1_8_back_event);
+}
+
+static void entry1_8(void)
+{
+    lv_group_focus_obj(scr1_8_lat);
+    ui_disp_full_refr();
+}
+
+static void exit1_8(void) { ui_disp_full_refr(); }
+
+static void destroy1_8(void)
+{
+    scr1_8_lat = scr1_8_lon = scr1_8_active = NULL;
+}
+
+static scr_lifecycle_t screen1_8 = {
+    .create = create1_8,
+    .entry = entry1_8,
+    .exit  = exit1_8,
+    .destroy = destroy1_8,
 };
 #endif
 
@@ -6391,6 +6547,7 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN1_5_ID,  &screen1_5);    //     - compose
     scr_mgr_register(SCREEN1_6_ID,  &screen1_6);    //  - companion app link
     scr_mgr_register(SCREEN1_7_ID,  &screen1_7);    //     - one setting
+    scr_mgr_register(SCREEN1_8_ID,  &screen1_8);    //  - set the location
     scr_mgr_register(SCREEN2_ID,    &screen2);      // Setting
     scr_mgr_register(SCREEN2_1_ID,  &screen2_1);    //  - Time
     scr_mgr_register(SCREEN2_1_1_ID,&screen2_1_1);  //     - time zone picker

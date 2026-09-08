@@ -35,6 +35,7 @@ enum {
     SCREEN1_5_ID,  // mesh compose
     SCREEN1_6_ID,  // companion app link
     SCREEN1_7_ID,  // one companion setting at a time
+    SCREEN1_8_ID,  // where this node is, typed in
     SCREEN2_ID,    // config
     SCREEN2_1_ID,  // time
     SCREEN2_1_1_ID,// time zone picker
