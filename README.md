@@ -123,6 +123,11 @@ fix it cannot get is not a location it can share. A live fix always wins, so a
 phone that has moved says where it is rather than where it was put, and the
 Share location row marks a given position *(set)*.
 
+**With sharing on, the receiver stays running.** It is otherwise suspended
+except while the GPS screen is showing, which is fine for a battery and useless
+for a position that has to reach an advert - the coordinates would only ever
+advance while somebody was looking at them.
+
 Setting a position turns sharing on if it was off, because a position handed
 over for adverts that never reaches one is no use to anybody. With neither a fix
 nor a set position, nothing is shared whatever the setting says, the row shows

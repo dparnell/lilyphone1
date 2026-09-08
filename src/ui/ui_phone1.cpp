@@ -2523,7 +2523,10 @@ static void entry3(void)
     ui_disp_full_refr();
 }
 static void exit3(void) {
-    ui_gps_task_suspend();
+    /* Left running when the mesh wants a position: this screen is not the only
+     * thing that reads the receiver any more, and suspending it here would take
+     * the position away from adverts the moment the screen closed. */
+    if(!mesh_net_wants_gps()) ui_gps_task_suspend();
     if(GPS_loop_timer) {
         lv_timer_del(GPS_loop_timer);
         GPS_loop_timer = NULL;

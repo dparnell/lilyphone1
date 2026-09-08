@@ -46,6 +46,11 @@
 
 extern "C" uint16_t ui_battery_27220_get_voltage(void);
 
+/* Declared rather than included, as above: the UI port header would drag LVGL
+ * in for the sake of two calls. These power the receiver itself. */
+extern "C" void ui_setting_set_gps_status(bool on);
+extern "C" bool ui_setting_get_gps_status(void);
+
 #define MESH_PREFS_NAMESPACE "mesh"
 
 /* What this node tells the app it understands.
@@ -995,8 +1000,13 @@ static void handle_frame(int len)
          *
          * An empty list is a perfectly ordinary answer, and is what a node with
          * nothing worth exposing returns. */
+        /* `gps` is here because the app looks for it: without it, an app has
+         * no way to know the device has a receiver at all, and says so. It
+         * reports whether the module is powered, which is the thing worth
+         * switching from a phone. */
         char vars[141];
-        snprintf(vars, sizeof(vars), "loc_share:%d", mesh_net_get_loc_policy());
+        snprintf(vars, sizeof(vars), "gps:%d,loc_share:%d",
+                 ui_setting_get_gps_status() ? 1 : 0, mesh_net_get_loc_policy());
 
         int vlen = strlen(vars);
         out_frame[0] = RESP_CODE_CUSTOM_VARS;
@@ -1013,7 +1023,10 @@ static void handle_frame(int len)
         } else {
             *value++ = '\0';
 
-            if(strcmp(name, "loc_share") == 0) {
+            if(strcmp(name, "gps") == 0) {
+                ui_setting_set_gps_status(value[0] == '1');
+                write_ok();
+            } else if(strcmp(name, "loc_share") == 0) {
                 mesh_net_set_loc_policy(atoi(value));
                 write_ok();
             } else {

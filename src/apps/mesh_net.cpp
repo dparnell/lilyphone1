@@ -527,6 +527,9 @@ static void region_load(void)
 }
 
 //************************************[ position ]******************************
+// Defined with the location policy, below the setter that first needs it.
+static void gps_follow_policy(void);
+
 bool mesh_net_get_position(double *lat, double *lon)
 {
     double la = 0, lo = 0;
@@ -577,6 +580,7 @@ void mesh_net_set_fixed_position(double lat, double lon)
     }
 
     region_save();
+    gps_follow_policy();
     Serial.printf("[MESH] position set by hand: %.5f, %.5f\n", lat, lon);
 }
 
@@ -585,12 +589,32 @@ int mesh_net_get_loc_policy(void)
     return loc_policy;
 }
 
+bool mesh_net_wants_gps(void)
+{
+    return loc_policy != MESH_LOC_OFF;
+}
+
+/* The receiver runs while its position is wanted.
+ *
+ * This was the hole under position sharing: the GPS task is suspended except
+ * while the GPS screen is showing, which is the vendor's design and reasonable
+ * for a battery - but it meant the cached coordinates only ever advanced while
+ * somebody was looking at them. Sharing a position the phone never reads shares
+ * whatever it last saw, or nothing at all.
+ */
+static void gps_follow_policy(void)
+{
+    if(mesh_net_wants_gps()) gps_task_resume();
+    else                     gps_task_suspend();
+}
+
 void mesh_net_set_loc_policy(int policy)
 {
     if(policy < MESH_LOC_OFF || policy > MESH_LOC_ALWAYS) return;
 
     loc_policy = policy;
     region_save();
+    gps_follow_policy();
 }
 
 const char *mesh_net_loc_policy_name(void)
@@ -814,6 +838,9 @@ bool mesh_net_init(void)
     Serial.printf("[MESH] up as \"%s\" (%s), %s: %.3fMHz bw%.1f sf%d cr%d\n",
                   self_name, key, mesh_net_region_name(), r.freq_mhz,
                   r.bandwidth_khz, r.spreading_factor, r.coding_rate);
+
+    // Whatever was remembered, the receiver should be in the matching state.
+    gps_follow_policy();
 
     mesh_running = true;
     xTaskCreate(mesh_task, "mesh", 1024 * 8, NULL, 6, &mesh_task_h);

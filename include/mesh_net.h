@@ -112,6 +112,10 @@ enum {
     MESH_LOC_ALWAYS,       // every advert, including the periodic ones
 };
 
+/* Whether the receiver needs to be running for the mesh's sake. Sharing a
+ * position it never reads is sharing nothing. */
+bool        mesh_net_wants_gps(void);
+
 int         mesh_net_get_loc_policy(void);
 void        mesh_net_set_loc_policy(int policy);
 const char *mesh_net_loc_policy_name(void);
