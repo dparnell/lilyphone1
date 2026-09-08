@@ -74,6 +74,19 @@ static float   airtime_factor  = 1.0f;
 static uint8_t multi_acks      = 0;
 static bool    manual_contacts = false;
 
+/* Which advert types are worth keeping, and how far away. All four types and
+ * any distance to begin with, which is what the node did before this was
+ * settable; bit 0, overwriting the oldest when full, stays off because losing
+ * a contact silently is worse than refusing a new one. */
+#define AUTOADD_OVERWRITE_OLDEST (1 << 0)
+#define AUTOADD_CHAT             (1 << 1)
+#define AUTOADD_REPEATER         (1 << 2)
+#define AUTOADD_ROOM             (1 << 3)
+#define AUTOADD_SENSOR           (1 << 4)
+
+static uint8_t autoadd_config   = AUTOADD_CHAT | AUTOADD_REPEATER | AUTOADD_ROOM | AUTOADD_SENSOR;
+static uint8_t autoadd_max_hops = 0;
+
 /* The presets. The wide ones are what the MeshCore community publishes per
  * region; the narrow one is what the mesh in Victoria actually runs, and the
  * difference is not only the frequency - bandwidth, spreading factor and coding
@@ -290,6 +303,30 @@ public:
     /* Off means the app curates the contact list itself, and adverts heard on
      * the air are reported but not kept. */
     bool isAutoAddEnabled() const override { return !manual_contacts; }
+
+    bool shouldAutoAddContactType(uint8_t type) const override {
+        switch(type) {
+            case ADV_TYPE_CHAT:     return autoadd_config & AUTOADD_CHAT;
+            case ADV_TYPE_REPEATER: return autoadd_config & AUTOADD_REPEATER;
+            case ADV_TYPE_ROOM:     return autoadd_config & AUTOADD_ROOM;
+            case ADV_TYPE_SENSOR:   return autoadd_config & AUTOADD_SENSOR;
+            default:                return false;
+        }
+    }
+
+    bool shouldOverwriteWhenFull() const override {
+        return autoadd_config & AUTOADD_OVERWRITE_OLDEST;
+    }
+
+    uint8_t getAutoAddMaxHops() const override { return autoadd_max_hops; }
+
+    /* Dispatcher keeps these where only a subclass can reach them, and the
+     * statistics an app asks for are not worth a friend declaration. */
+    uint16_t errFlags() const     { return _err_flags; }
+    int      outboundCount() const { return _mgr->getOutboundTotal(); }
+
+    bool connectedTo(const uint8_t *pub_key)   { return hasConnectionTo(pub_key); }
+    void disconnectFrom(const uint8_t *pub_key) { stopConnection(pub_key); }
 
     /* Somebody announced themselves. BaseChatMesh has already added them as a
      * contact by the time this is called, which is what makes the node list and
@@ -530,6 +567,8 @@ static void region_save(void)
     prefs.putFloat("airtime", airtime_factor);
     prefs.putUChar("acks", multi_acks);
     prefs.putBool("manualc", manual_contacts);
+    prefs.putUChar("aacfg", autoadd_config);
+    prefs.putUChar("aahops", autoadd_max_hops);
     prefs.end();
 }
 
@@ -551,6 +590,8 @@ static void region_load(void)
     airtime_factor                = prefs.getFloat("airtime", airtime_factor);
     multi_acks                    = prefs.getUChar("acks", multi_acks);
     manual_contacts               = prefs.getBool("manualc", manual_contacts);
+    autoadd_config                = prefs.getUChar("aacfg", autoadd_config);
+    autoadd_max_hops              = prefs.getUChar("aahops", autoadd_max_hops);
     prefs.end();
 
     if(region_idx < 0 || region_idx >= MESH_REGION_COUNT) region_idx = 0;
@@ -672,6 +713,78 @@ void mesh_net_set_tuning(uint32_t rx, uint32_t af)
 
     Serial.printf("[MESH] tuning: rx delay base %.3f, airtime factor %.3f\n",
                   rx_delay_base, airtime_factor);
+}
+
+uint8_t mesh_net_get_autoadd(uint8_t *max_hops)
+{
+    if(max_hops) *max_hops = autoadd_max_hops;
+    return autoadd_config;
+}
+
+void mesh_net_set_autoadd(uint8_t config, uint8_t max_hops)
+{
+    autoadd_config   = config;
+    autoadd_max_hops = max_hops > 64 ? 64 : max_hops;
+    region_save();
+
+    Serial.printf("[MESH] auto add config %02X, up to %d hop%s\n",
+                  autoadd_config, autoadd_max_hops,
+                  autoadd_max_hops == 1 ? "" : "s");
+}
+
+bool mesh_node_has_connection(const uint8_t *pub_key)
+{
+    return the_mesh != NULL && the_mesh->connectedTo(pub_key);
+}
+
+void mesh_node_stop_connection(const uint8_t *pub_key)
+{
+    if(the_mesh) the_mesh->disconnectFrom(pub_key);
+}
+
+void mesh_net_get_stats(mesh_stats_t *out)
+{
+    if(out == NULL) return;
+    memset(out, 0, sizeof(*out));
+
+    out->battery_mv  = ui_battery_27220_get_voltage();
+    out->uptime_secs = millis() / 1000;
+
+    if(the_mesh == NULL) return;
+
+    out->err_flags   = the_mesh->errFlags();
+    out->queued      = (uint8_t)the_mesh->outboundCount();
+
+    out->noise_floor = (int16_t)radio_driver.getNoiseFloor();
+    out->last_rssi   = (int8_t)radio_driver.getLastRSSI();
+    out->last_snr_x4 = (int8_t)(radio_driver.getLastSNR() * 4);
+    out->tx_air_secs = the_mesh->getTotalAirTime() / 1000;
+    out->rx_air_secs = the_mesh->getReceiveAirTime() / 1000;
+
+    out->packets_recv = radio_driver.getPacketsRecv();
+    out->packets_sent = radio_driver.getPacketsSent();
+    out->recv_errors  = radio_driver.getPacketsRecvErrors();
+    out->sent_flood   = the_mesh->getNumSentFlood();
+    out->sent_direct  = the_mesh->getNumSentDirect();
+    out->recv_flood   = the_mesh->getNumRecvFlood();
+    out->recv_direct  = the_mesh->getNumRecvDirect();
+}
+
+void mesh_net_factory_reset(void)
+{
+    Serial.println("[MESH] factory reset: erasing everything and restarting");
+
+    /* Both namespaces, because settings live in one and notification
+     * preferences in the other, and half a reset is not one. */
+    Preferences prefs;
+    if(prefs.begin(MESH_PREFS_NAMESPACE, false)) { prefs.clear(); prefs.end(); }
+    if(prefs.begin("notify", false))             { prefs.clear(); prefs.end(); }
+
+    // Takes the identity, the contacts and the messages with it.
+    SPIFFS.format();
+
+    delay(500);
+    esp_restart();
 }
 
 bool mesh_net_get_manual_contacts(void) { return manual_contacts; }

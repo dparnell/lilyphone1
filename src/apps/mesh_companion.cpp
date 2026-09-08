@@ -91,15 +91,28 @@ extern "C" bool ui_setting_get_gps_status(void);
 #define CMD_GET_CONTACT_BY_KEY     30
 #define CMD_GET_CHANNEL            31
 #define CMD_SET_CHANNEL            32
+#define CMD_EXPORT_PRIVATE_KEY     23
+#define CMD_IMPORT_PRIVATE_KEY     24
+#define CMD_SEND_RAW_DATA          25
+#define CMD_HAS_CONNECTION         28
+#define CMD_LOGOUT                 29
 #define CMD_SIGN_START             33
 #define CMD_SIGN_DATA              34
 #define CMD_SIGN_FINISH            35
 #define CMD_SET_OTHER_PARAMS       38
 #define CMD_GET_CUSTOM_VARS        40
 #define CMD_SET_CUSTOM_VAR         41
+#define CMD_SET_DEVICE_PIN         37
 #define CMD_GET_ADVERT_PATH        42
 #define CMD_GET_TUNING_PARAMS      43
+#define CMD_FACTORY_RESET          51
 #define CMD_SET_FLOOD_SCOPE_KEY    54
+#define CMD_GET_STATS              56
+#define CMD_SET_AUTOADD_CONFIG     58
+#define CMD_GET_AUTOADD_CONFIG     59
+#define CMD_GET_ALLOWED_REPEAT_FREQ 60
+#define CMD_SET_PATH_HASH_MODE     61
+#define CMD_SEND_CHANNEL_DATA      62
 #define CMD_SET_DEFAULT_FLOOD_SCOPE 63
 #define CMD_GET_DEFAULT_FLOOD_SCOPE 64
 
@@ -123,9 +136,18 @@ extern "C" bool ui_setting_get_gps_status(void);
 #define RESP_CODE_SIGN_START          19
 #define RESP_CODE_SIGNATURE           20
 #define RESP_CODE_CUSTOM_VARS         21
+#define RESP_CODE_DISABLED            15
 #define RESP_CODE_ADVERT_PATH         22
 #define RESP_CODE_TUNING_PARAMS       23
+#define RESP_CODE_STATS               24
+#define RESP_CODE_AUTOADD_CONFIG      25
+#define RESP_ALLOWED_REPEAT_FREQ      26
 #define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
+
+// CMD_GET_STATS sub-types
+#define STATS_TYPE_CORE    0
+#define STATS_TYPE_RADIO   1
+#define STATS_TYPE_PACKETS 2
 
 // Sent to the app whenever, rather than in answer to anything.
 #define PUSH_CODE_ADVERT           0x80
@@ -956,6 +978,166 @@ static void handle_frame(int len)
             write_ok();
         }
 
+    } else if(cmd == CMD_EXPORT_PRIVATE_KEY || cmd == CMD_IMPORT_PRIVATE_KEY) {
+        /* Refused by build rather than by circumstance, which is what the
+         * protocol's "disabled" answer is for. Handing the identity key out
+         * over a link, or letting one be written in, is not something this
+         * firmware does - the key is the node, and everyone who knows this node
+         * knows it by that key. */
+        out_frame[0] = RESP_CODE_DISABLED;
+        write_frame(out_frame, 1);
+
+    } else if(cmd == CMD_SEND_RAW_DATA && len >= 6) {
+        int    i        = 1;
+        int8_t path_len = (int8_t)cmd_frame[i++];
+
+        if(path_len < 0 || i + path_len + 4 > len) {
+            // Flooding raw data is not offered: it has no addressee and no
+            // acknowledgement, so it would be shouting into the whole mesh.
+            write_err(ERR_CODE_UNSUPPORTED_CMD);
+        } else {
+            uint8_t *path = &cmd_frame[i];
+            i += path_len;
+
+            mesh::Packet *pkt = chat_mesh->createRawData(&cmd_frame[i], len - i);
+            if(pkt) {
+                chat_mesh->sendDirect(pkt, path, path_len);
+                write_ok();
+            } else {
+                write_err(ERR_CODE_TABLE_FULL);
+            }
+        }
+
+    } else if(cmd == CMD_HAS_CONNECTION && len >= 1 + PUB_KEY_SIZE) {
+        if(mesh_node_has_connection(&cmd_frame[1])) write_ok();
+        else                                          write_err(ERR_CODE_NOT_FOUND);
+
+    } else if(cmd == CMD_LOGOUT && len >= 1 + PUB_KEY_SIZE) {
+        mesh_node_stop_connection(&cmd_frame[1]);
+        write_ok();
+
+    } else if(cmd == CMD_SET_DEVICE_PIN && len >= 5) {
+        uint32_t pin;
+        memcpy(&pin, &cmd_frame[1], 4);
+
+        // Zero means no pairing code at all; anything else has to be six digits.
+        if(pin == 0 || (pin >= 100000 && pin <= 999999)) {
+            mesh_companion_set_ble_pin(pin);
+            write_ok();
+        } else {
+            write_err(ERR_CODE_ILLEGAL_ARG);
+        }
+
+    } else if(cmd == CMD_FACTORY_RESET && len >= 6 &&
+              memcmp(&cmd_frame[1], "reset", 5) == 0) {
+        /* The word has to be spelled out in the frame, which is the protocol's
+         * way of making this hard to do by accident. The link goes down first:
+         * the app disconnects the moment the device restarts, and reconnecting
+         * to a node that is erasing itself helps nobody. */
+        write_ok();
+        if(active_link) active_link->disable();
+
+        mesh_net_factory_reset();   // does not return
+
+    } else if(cmd == CMD_GET_STATS && len >= 2) {
+        mesh_stats_t st;
+        mesh_net_get_stats(&st);
+
+        int i = 0;
+        out_frame[i++] = RESP_CODE_STATS;
+        out_frame[i++] = cmd_frame[1];
+
+        if(cmd_frame[1] == STATS_TYPE_CORE) {
+            memcpy(&out_frame[i], &st.battery_mv, 2);   i += 2;
+            memcpy(&out_frame[i], &st.uptime_secs, 4);  i += 4;
+            memcpy(&out_frame[i], &st.err_flags, 2);    i += 2;
+            out_frame[i++] = st.queued;
+            write_frame(out_frame, i);
+
+        } else if(cmd_frame[1] == STATS_TYPE_RADIO) {
+            memcpy(&out_frame[i], &st.noise_floor, 2);  i += 2;
+            out_frame[i++] = (uint8_t)st.last_rssi;
+            out_frame[i++] = (uint8_t)st.last_snr_x4;
+            memcpy(&out_frame[i], &st.tx_air_secs, 4);  i += 4;
+            memcpy(&out_frame[i], &st.rx_air_secs, 4);  i += 4;
+            write_frame(out_frame, i);
+
+        } else if(cmd_frame[1] == STATS_TYPE_PACKETS) {
+            memcpy(&out_frame[i], &st.packets_recv, 4); i += 4;
+            memcpy(&out_frame[i], &st.packets_sent, 4); i += 4;
+            memcpy(&out_frame[i], &st.sent_flood, 4);   i += 4;
+            memcpy(&out_frame[i], &st.sent_direct, 4);  i += 4;
+            memcpy(&out_frame[i], &st.recv_flood, 4);   i += 4;
+            memcpy(&out_frame[i], &st.recv_direct, 4);  i += 4;
+            memcpy(&out_frame[i], &st.recv_errors, 4);  i += 4;
+            write_frame(out_frame, i);
+
+        } else {
+            write_err(ERR_CODE_ILLEGAL_ARG);
+        }
+
+    } else if(cmd == CMD_SET_AUTOADD_CONFIG && len >= 2) {
+        mesh_net_set_autoadd(cmd_frame[1], len >= 3 ? cmd_frame[2] : 0);
+        write_ok();
+
+    } else if(cmd == CMD_GET_AUTOADD_CONFIG) {
+        uint8_t hops = 0;
+        uint8_t cfg  = mesh_net_get_autoadd(&hops);
+
+        out_frame[0] = RESP_CODE_AUTOADD_CONFIG;
+        out_frame[1] = cfg;
+        out_frame[2] = hops;
+        write_frame(out_frame, 3);
+
+    } else if(cmd == CMD_GET_ALLOWED_REPEAT_FREQ) {
+        /* An empty list, which is the truthful answer: this node does not
+         * repeat for others, so there is no frequency on which it would. */
+        out_frame[0] = RESP_ALLOWED_REPEAT_FREQ;
+        write_frame(out_frame, 1);
+
+    } else if(cmd == CMD_SET_PATH_HASH_MODE && len >= 3 && cmd_frame[1] == 0) {
+        /* Only the default mode, because that is the only one this node sends
+         * in. Agreeing to another would be claiming to hash paths a way it does
+         * not. */
+        if(cmd_frame[2] == 0) {
+            write_ok();
+        } else {
+            Serial.printf("[LINK] path hash mode %d asked for; this node sends in mode 0\n",
+                          (int)cmd_frame[2]);
+            write_err(ERR_CODE_UNSUPPORTED_CMD);
+        }
+
+    } else if(cmd == CMD_SEND_CHANNEL_DATA && len >= 4) {
+        int     i           = 1;
+        uint8_t channel_idx = cmd_frame[i++];
+        uint8_t path_len    = cmd_frame[i++];
+
+        uint8_t path[MAX_PATH_SIZE];
+        if(path_len != 0xFF) {
+            if(!mesh::Packet::isValidPathLen(path_len)) {
+                write_err(ERR_CODE_ILLEGAL_ARG);
+                return;
+            }
+            i += mesh::Packet::writePath(path, &cmd_frame[i], path_len);
+        }
+
+        uint16_t data_type = ((uint16_t)cmd_frame[i]) | (((uint16_t)cmd_frame[i + 1]) << 8);
+        i += 2;
+
+        int payload_len = (len > i) ? (len - i) : 0;
+
+        ChannelDetails channel;
+        if(!chat_mesh->getChannel(channel_idx, channel)) {
+            write_err(ERR_CODE_NOT_FOUND);
+        } else if(payload_len > MAX_GROUP_DATA_LENGTH) {
+            write_err(ERR_CODE_ILLEGAL_ARG);
+        } else if(chat_mesh->sendGroupData(channel.channel, path, path_len,
+                                           data_type, &cmd_frame[i], payload_len)) {
+            write_ok();
+        } else {
+            write_err(ERR_CODE_TABLE_FULL);
+        }
+
     } else if(cmd == CMD_SIGN_START) {
         /* The app is about to send something to sign. The reply says how much
          * this node will take, so it can split the message accordingly. */
@@ -1441,6 +1623,17 @@ void mesh_companion_get_detail(char *buf, int len)
 uint32_t mesh_companion_ble_pin(void)
 {
     return ble_pin;
+}
+
+void mesh_companion_set_ble_pin(uint32_t pin)
+{
+    if(pin != 0 && (pin < 100000 || pin > 999999)) return;
+
+    ble_pin = pin;
+    companion_save();
+
+    Serial.printf("[LINK] pairing code is now %06u; it takes effect at the next restart\n",
+                  (unsigned)pin);
 }
 
 void mesh_companion_ble_name(char *buf, int len)

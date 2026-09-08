@@ -163,6 +163,37 @@ void        mesh_net_set_multi_acks(uint8_t count);
  * there after a restart. MeshCore keeps them in RAM alone. */
 void        mesh_net_save_channels(void);
 
+/* Which kinds of node are kept when heard, as the companion protocol's bitmask:
+ * bit 0 overwrites the oldest contact when full, bits 1..4 are chat, repeater,
+ * room server and sensor. `max_hops` is how far away one may be and still be
+ * kept, zero meaning any distance. Persisted. */
+uint8_t     mesh_net_get_autoadd(uint8_t *max_hops);
+void        mesh_net_set_autoadd(uint8_t config, uint8_t max_hops);
+
+/* Everything the radio and the mesh have counted since boot. Real numbers, not
+ * estimates - which is what makes them worth reporting to an app. */
+typedef struct {
+    uint16_t battery_mv;
+    uint32_t uptime_secs;
+    uint16_t err_flags;
+    uint8_t  queued;         // packets waiting to go out
+
+    int16_t  noise_floor;
+    int8_t   last_rssi;
+    int8_t   last_snr_x4;    // quarter dB, as the protocol wants it
+    uint32_t tx_air_secs;
+    uint32_t rx_air_secs;
+
+    uint32_t packets_recv, packets_sent, recv_errors;
+    uint32_t sent_flood, sent_direct, recv_flood, recv_direct;
+} mesh_stats_t;
+
+void        mesh_net_get_stats(mesh_stats_t *out);
+
+/* Forgets everything this node has been told: its identity, its contacts, its
+ * settings and the phone's own stored files. Reboots and does not return. */
+void        mesh_net_factory_reset(void);
+
 /* Transmit power in dBm. The ceiling is the SX1262's, not a legal limit - what
  * is allowed where you are is your business. Persisted. */
 #define MESH_TX_POWER_MAX 22

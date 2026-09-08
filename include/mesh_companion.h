@@ -68,6 +68,11 @@ void mesh_companion_get_detail(char *buf, int len);
 /* What the user has to type into the app to pair over Bluetooth. Generated once
  * and then persisted, so it does not change under a paired phone. */
 uint32_t mesh_companion_ble_pin(void);
+/* Changes it. Zero means pair without one. The Bluetooth stack reads the code
+ * when it starts, so a change takes effect at the next restart - which is worth
+ * saying, since a phone that pairs with the old code is not evidence it did
+ * not change. */
+void     mesh_companion_set_ble_pin(uint32_t pin);
 /* The name this node advertises itself under over Bluetooth. */
 void mesh_companion_ble_name(char *buf, int len);
 

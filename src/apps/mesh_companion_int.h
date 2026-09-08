@@ -23,6 +23,11 @@ void companion_service(void);
  * the node's own send is the one being answered. */
 ContactInfo *companion_process_ack(BaseChatMesh *chat, const uint8_t *data);
 
+/* Connections to a repeater or room server. BaseChatMesh keeps these protected,
+ * so the node exposes just the two the protocol asks about. */
+bool mesh_node_has_connection(const uint8_t *pub_key);
+void mesh_node_stop_connection(const uint8_t *pub_key);
+
 /* Somebody was heard from, or a route to them changed. */
 void companion_on_advert(const ContactInfo &contact, bool is_new);
 
