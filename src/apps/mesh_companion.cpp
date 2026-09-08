@@ -271,11 +271,67 @@ static bool link_up(void)
     return active_link != NULL && active_link->isConnected();
 }
 
+/* What an answer was, in words.
+ *
+ * The transport logs outgoing frames as a header byte and a length, which is
+ * enough to see that something was sent and useless for seeing what. Reading an
+ * exchange back afterwards is most of how anything gets diagnosed here, so the
+ * codes are named. */
+static const char *resp_name(uint8_t code)
+{
+    switch(code) {
+        case RESP_CODE_OK:                  return "ok";
+        case RESP_CODE_ERR:                 return "error";
+        case RESP_CODE_CONTACTS_START:      return "contacts start";
+        case RESP_CODE_CONTACT:             return "contact";
+        case RESP_CODE_END_OF_CONTACTS:     return "end of contacts";
+        case RESP_CODE_SELF_INFO:           return "self info";
+        case RESP_CODE_SENT:                return "sent";
+        case RESP_CODE_CONTACT_MSG_RECV:
+        case RESP_CODE_CONTACT_MSG_RECV_V3: return "a message";
+        case RESP_CODE_CHANNEL_MSG_RECV:
+        case RESP_CODE_CHANNEL_MSG_RECV_V3: return "a channel message";
+        case RESP_CODE_CURR_TIME:           return "device time";
+        case RESP_CODE_NO_MORE_MESSAGES:    return "no more messages";
+        case RESP_CODE_EXPORT_CONTACT:      return "exported contact";
+        case RESP_CODE_BATT_AND_STORAGE:    return "battery and storage";
+        case RESP_CODE_DEVICE_INFO:         return "device info";
+        case RESP_CODE_DISABLED:            return "disabled in this build";
+        case RESP_CODE_CHANNEL_INFO:        return "channel info";
+        case RESP_CODE_SIGN_START:          return "ready to sign";
+        case RESP_CODE_SIGNATURE:           return "signature";
+        case RESP_CODE_CUSTOM_VARS:         return "custom variables";
+        case RESP_CODE_ADVERT_PATH:         return "advert path";
+        case RESP_CODE_TUNING_PARAMS:       return "tuning";
+        case RESP_CODE_STATS:               return "statistics";
+        case RESP_CODE_AUTOADD_CONFIG:      return "auto add config";
+        case RESP_ALLOWED_REPEAT_FREQ:      return "allowed repeat frequencies";
+        case RESP_CODE_DEFAULT_FLOOD_SCOPE: return "default flood scope";
+        case PUSH_CODE_ADVERT:              return "push: advert";
+        case PUSH_CODE_PATH_UPDATED:        return "push: path updated";
+        case PUSH_CODE_SEND_CONFIRMED:      return "push: delivered";
+        case PUSH_CODE_MSG_WAITING:         return "push: a message is waiting";
+        case PUSH_CODE_NEW_ADVERT:          return "push: a new contact";
+        default:                            return "unnamed";
+    }
+}
+
 static void write_frame(const uint8_t *buf, int len)
 {
     if(active_link == NULL) return;
 
-    if(active_link->writeFrame(buf, len) > 0) frames_tx++;
+    if(active_link->writeFrame(buf, len) > 0) {
+        frames_tx++;
+
+        if(buf[0] == RESP_CODE_ERR && len >= 2) {
+            Serial.printf("[LINK]  -> error %d\n", (int)buf[1]);
+        } else {
+            Serial.printf("[LINK]  -> %s, %d bytes\n", resp_name(buf[0]), len);
+        }
+    } else {
+        // Dropped rather than sent, which looks identical from the app's end.
+        Serial.printf("[LINK]  -> %s NOT SENT (link busy or full)\n", resp_name(buf[0]));
+    }
 }
 
 static void write_ok(void)
