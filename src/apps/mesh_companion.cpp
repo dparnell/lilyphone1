@@ -919,7 +919,28 @@ static void handle_frame(int len)
             char name[MESH_NET_NAME_LEN];
             mesh_net_get_self_name(name, sizeof(name));
 
-            mesh::Packet *pkt = chat_mesh->createSelfAdvert(name);
+            /* With the position in it, when there is one to give.
+             *
+             * This is the packet an app submits to put the node on a map, and
+             * building it with the name-only call left it carrying no location
+             * at all - so the map refused it however well the GPS was doing.
+             * The advert this node broadcasts had the position; the one handed
+             * to the app did not, which is the sort of difference that is
+             * invisible from either end. */
+            double lat, lon;
+            bool with_loc = mesh_net_get_loc_policy() != MESH_LOC_OFF &&
+                            mesh_net_get_position(&lat, &lon);
+
+            mesh::Packet *pkt = with_loc ? chat_mesh->createSelfAdvert(name, lat, lon)
+                                         : chat_mesh->createSelfAdvert(name);
+
+            if(!with_loc) {
+                Serial.printf("[LINK] exported without a position: %s\n",
+                              mesh_net_get_loc_policy() == MESH_LOC_OFF
+                                  ? "sharing the location is switched off"
+                                  : "there is no fix and none has been set");
+            }
+
             if(pkt) {
                 pkt->header |= ROUTE_TYPE_FLOOD;   // how it would normally travel
                 out_frame[0] = RESP_CODE_EXPORT_CONTACT;
