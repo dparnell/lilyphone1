@@ -689,10 +689,10 @@ static void handle_frame(int len)
         memcpy(&out_frame[i], chat_mesh->self_id.pub_key, PUB_KEY_SIZE);  i += PUB_KEY_SIZE;
         memcpy(&out_frame[i], &lat, 4);  i += 4;
         memcpy(&out_frame[i], &lon, 4);  i += 4;
-        out_frame[i++] = 0;   // multi_acks
+        out_frame[i++] = mesh_net_get_multi_acks();
         out_frame[i++] = sharing ? 1 : 0;   // advert location policy
         out_frame[i++] = 0;   // telemetry modes
-        out_frame[i++] = 0;   // contacts are added from adverts, not by hand
+        out_frame[i++] = mesh_net_get_manual_contacts() ? 1 : 0;
         memcpy(&out_frame[i], &freq_khz, 4);  i += 4;
         memcpy(&out_frame[i], &bw_hz, 4);     i += 4;
         out_frame[i++] = radio.spreading_factor;
@@ -892,7 +892,14 @@ static void handle_frame(int len)
         }
 
     } else if(cmd == CMD_SEND_SELF_ADVERT) {
-        mesh_net_advertise();
+        /* The optional byte says how far: flooded across the mesh, or heard
+         * only by nodes in direct radio range. Ignoring it meant an app asking
+         * to introduce itself to the room shouted across the town instead. */
+        bool flood = (len < 2) || cmd_frame[1] == 1;
+
+        if(flood) mesh_net_advertise();
+        else      mesh_net_advertise_zero_hop();
+
         write_ok();
 
     } else if(cmd == CMD_SET_ADVERT_NAME && len >= 2) {
@@ -1063,14 +1070,32 @@ static void handle_frame(int len)
         }
 
     } else if(cmd == CMD_SET_FLOOD_SCOPE_KEY && len >= 2) {
-        /* Scoping limits how far a flood travels. This node has none - it
-         * always floods unscoped, which is MeshCore's own default and the
-         * widest reach - so the key is accepted and has no effect. Refusing
-         * instead stops some apps part way through connecting. */
-        write_ok();
+        /* Scoping limits how far a flood travels. This node has none: it always
+         * floods unscoped, which is MeshCore's own default and the widest
+         * reach.
+         *
+         * So "send unscoped" and "clear the scope override" are both already
+         * true and can be agreed to honestly, while an actual scope key is
+         * something this node cannot honour - and saying yes to that would be
+         * claiming to confine traffic that is in fact going everywhere. */
+        bool asking_unscoped = (cmd_frame[1] == 1);
+        bool clearing        = (cmd_frame[1] == 0 && len < 2 + 16);
+
+        if(asking_unscoped || clearing) {
+            write_ok();
+        } else {
+            Serial.println("[LINK] a flood scope key was asked for; this node cannot scope");
+            write_err(ERR_CODE_UNSUPPORTED_CMD);
+        }
 
     } else if(cmd == CMD_SET_DEFAULT_FLOOD_SCOPE) {
-        write_ok();
+        // Same again: clearing it is true, setting one is not.
+        if(len < 1 + 31 + 16) {
+            write_ok();
+        } else {
+            Serial.println("[LINK] a default flood scope was asked for; this node cannot scope");
+            write_err(ERR_CODE_UNSUPPORTED_CMD);
+        }
 
     } else if(cmd == CMD_GET_DEFAULT_FLOOD_SCOPE) {
         // A bare response code is how the protocol says "no scope set".
@@ -1078,18 +1103,39 @@ static void handle_frame(int len)
         write_frame(out_frame, 1);
 
     } else if(cmd == CMD_GET_TUNING_PARAMS) {
-        // The defaults MeshCore ships with; this node does not expose tuning.
-        uint32_t rx_delay_base = 0, airtime_factor = 1000;
+        uint32_t rx = 0, af = 0;
+        mesh_net_get_tuning(&rx, &af);
+
         int i = 0;
         out_frame[i++] = RESP_CODE_TUNING_PARAMS;
-        memcpy(&out_frame[i], &rx_delay_base, 4);   i += 4;
-        memcpy(&out_frame[i], &airtime_factor, 4);  i += 4;
+        memcpy(&out_frame[i], &rx, 4);  i += 4;
+        memcpy(&out_frame[i], &af, 4);  i += 4;
         write_frame(out_frame, i);
 
-    } else if(cmd == CMD_SET_TUNING_PARAMS || cmd == CMD_SET_OTHER_PARAMS) {
-        // Accepted and ignored: answering with an error here would stop some
-        // apps part-way through connecting, over settings this node has no use
-        // for.
+    } else if(cmd == CMD_SET_TUNING_PARAMS && len >= 9) {
+        uint32_t rx, af;
+        memcpy(&rx, &cmd_frame[1], 4);
+        memcpy(&af, &cmd_frame[5], 4);
+
+        mesh_net_set_tuning(rx, af);
+        write_ok();
+
+    } else if(cmd == CMD_SET_OTHER_PARAMS && len >= 2) {
+        /* Four settings in one frame, of which this node has a use for three.
+         * Each is applied where there is something to apply it to, and the one
+         * that is dropped says so rather than being counted as done. */
+        mesh_net_set_manual_contacts(cmd_frame[1] != 0);
+
+        if(len >= 3 && cmd_frame[2] != 0) {
+            Serial.println("[LINK] telemetry modes ignored; this node reports none");
+        }
+        if(len >= 4) {
+            mesh_net_set_loc_policy(cmd_frame[3] == 0 ? MESH_LOC_OFF : MESH_LOC_ALWAYS);
+        }
+        if(len >= 5) {
+            mesh_net_set_multi_acks(cmd_frame[4]);
+        }
+
         write_ok();
 
     } else if(cmd == CMD_GET_BATT_AND_STORAGE) {
@@ -1128,8 +1174,14 @@ static void handle_frame(int len)
             memset(channel.channel.secret, 0, sizeof(channel.channel.secret));
             memcpy(channel.channel.secret, &cmd_frame[2 + 32], 16);
 
-            if(chat_mesh->setChannel(cmd_frame[1], channel)) write_ok();
-            else                                             write_err(ERR_CODE_NOT_FOUND);
+            if(chat_mesh->setChannel(cmd_frame[1], channel)) {
+                // MeshCore keeps channels in RAM alone, so without this the
+                // channel would be gone by the next restart.
+                mesh_net_save_channels();
+                write_ok();
+            } else {
+                write_err(ERR_CODE_NOT_FOUND);
+            }
         }
 
     } else if(cmd == CMD_REBOOT && len >= 7 && memcmp(&cmd_frame[1], "reboot", 6) == 0) {

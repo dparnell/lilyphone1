@@ -134,6 +134,35 @@ bool        mesh_net_position_is_fixed(void);
  * to anybody. Persisted. */
 void        mesh_net_set_fixed_position(double lat, double lon);
 
+/* Announces this node without flooding: heard only by nodes in direct radio
+ * range, which is what an app asks for when it wants to introduce itself to
+ * whoever is nearby without troubling the whole mesh. */
+void        mesh_net_advertise_zero_hop(void);
+
+/* Tuning, in thousandths so it survives the protocol's integer fields.
+ *
+ * `rx_delay_base` is the base of the exponent in the receive back-off; zero
+ * disables the delay entirely. `airtime_factor` sets the share of the duty
+ * cycle window this node may transmit in. Both are MeshCore's own knobs and are
+ * really used - the defaults, 10.0 and 1.0, are what the library does when
+ * nothing overrides it. Persisted. */
+void        mesh_net_get_tuning(uint32_t *rx_delay_base, uint32_t *airtime_factor);
+void        mesh_net_set_tuning(uint32_t rx_delay_base, uint32_t airtime_factor);
+
+/* Whether contacts heard advertising are added on their own. Off means the app
+ * curates the list by hand. Persisted. */
+bool        mesh_net_get_manual_contacts(void);
+void        mesh_net_set_manual_contacts(bool on);
+
+/* How many extra copies of an acknowledgement to send. More gets through a
+ * lossy path at the cost of airtime. Persisted. */
+uint8_t     mesh_net_get_multi_acks(void);
+void        mesh_net_set_multi_acks(uint8_t count);
+
+/* Writes the group channels to storage, so one added from an app is still
+ * there after a restart. MeshCore keeps them in RAM alone. */
+void        mesh_net_save_channels(void);
+
 /* Transmit power in dBm. The ceiling is the SX1262's, not a legal limit - what
  * is allowed where you are is your business. Persisted. */
 #define MESH_TX_POWER_MAX 22

@@ -66,6 +66,14 @@ static int    loc_policy = MESH_LOC_OFF;
 static double fixed_lat = 0.0, fixed_lon = 0.0;
 static bool   pos_from_fixed = false;
 
+/* MeshCore's own tuning, in the units its virtuals want. These defaults are
+ * what the library does when nothing overrides them, so a node that has never
+ * been tuned behaves exactly as before. */
+static float   rx_delay_base   = 10.0f;
+static float   airtime_factor  = 1.0f;
+static uint8_t multi_acks      = 0;
+static bool    manual_contacts = false;
+
 /* The presets. The wide ones are what the MeshCore community publishes per
  * region; the narrow one is what the mesh in Victoria actually runs, and the
  * difference is not only the frequency - bandwidth, spreading factor and coding
@@ -266,6 +274,22 @@ public:
     /* A phone in a pocket is a poor repeater and forwarding costs battery, so
      * this node listens and speaks for itself but does not relay. */
     bool allowPacketForward(const mesh::Packet *packet) override { return false; }
+
+    /* The tuning an app can set. Overriding these is what makes those commands
+     * mean something - without them the settings would be stored, reported back
+     * and never consulted, which is worse than refusing them. */
+    float getAirtimeBudgetFactor() const override { return airtime_factor; }
+
+    int calcRxDelay(float score, uint32_t air_time) const override {
+        if(rx_delay_base <= 0.0f) return 0;   // zero means no back-off at all
+        return (int)((pow(rx_delay_base, 0.85f - score) - 1.0) * air_time);
+    }
+
+    uint8_t getExtraAckTransmitCount() const override { return multi_acks; }
+
+    /* Off means the app curates the contact list itself, and adverts heard on
+     * the air are reported but not kept. */
+    bool isAutoAddEnabled() const override { return !manual_contacts; }
 
     /* Somebody announced themselves. BaseChatMesh has already added them as a
      * contact by the time this is called, which is what makes the node list and
@@ -502,6 +526,10 @@ static void region_save(void)
     prefs.putInt("locpol", loc_policy);
     prefs.putDouble("fixlat", fixed_lat);
     prefs.putDouble("fixlon", fixed_lon);
+    prefs.putFloat("rxdelay", rx_delay_base);
+    prefs.putFloat("airtime", airtime_factor);
+    prefs.putUChar("acks", multi_acks);
+    prefs.putBool("manualc", manual_contacts);
     prefs.end();
 }
 
@@ -519,6 +547,10 @@ static void region_load(void)
     loc_policy                    = prefs.getInt("locpol", loc_policy);
     fixed_lat                     = prefs.getDouble("fixlat", fixed_lat);
     fixed_lon                     = prefs.getDouble("fixlon", fixed_lon);
+    rx_delay_base                 = prefs.getFloat("rxdelay", rx_delay_base);
+    airtime_factor                = prefs.getFloat("airtime", airtime_factor);
+    multi_acks                    = prefs.getUChar("acks", multi_acks);
+    manual_contacts               = prefs.getBool("manualc", manual_contacts);
     prefs.end();
 
     if(region_idx < 0 || region_idx >= MESH_REGION_COUNT) region_idx = 0;
@@ -626,6 +658,39 @@ const char *mesh_net_loc_policy_name(void)
     }
 }
 
+void mesh_net_get_tuning(uint32_t *rx, uint32_t *af)
+{
+    if(rx) *rx = (uint32_t)(rx_delay_base * 1000.0f);
+    if(af) *af = (uint32_t)(airtime_factor * 1000.0f);
+}
+
+void mesh_net_set_tuning(uint32_t rx, uint32_t af)
+{
+    rx_delay_base  = rx / 1000.0f;
+    airtime_factor = af / 1000.0f;
+    region_save();
+
+    Serial.printf("[MESH] tuning: rx delay base %.3f, airtime factor %.3f\n",
+                  rx_delay_base, airtime_factor);
+}
+
+bool mesh_net_get_manual_contacts(void) { return manual_contacts; }
+
+void mesh_net_set_manual_contacts(bool on)
+{
+    manual_contacts = on;
+    region_save();
+    Serial.printf("[MESH] contacts are %s\n", on ? "added by hand" : "added from adverts");
+}
+
+uint8_t mesh_net_get_multi_acks(void) { return multi_acks; }
+
+void mesh_net_set_multi_acks(uint8_t count)
+{
+    multi_acks = count;
+    region_save();
+}
+
 int8_t mesh_net_get_tx_power(void)
 {
     return tx_power_dbm;
@@ -701,7 +766,7 @@ void mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
 }
 
 // Defined with the rest of the advert handling, below the task that calls it.
-static void advert_send(bool deliberate);
+static void advert_send(bool deliberate, bool flood = true);
 
 //************************************[ the clock ]*****************************
 /* Keeping the mesh's clock in step with the phone's.
@@ -734,6 +799,75 @@ static void clock_service(void)
     rtc_clock.setCurrentTime((uint32_t)now);
     Serial.printf("[MESH] clock set from the phone: %u, was %u (%d seconds out)\n",
                   (unsigned)now, (unsigned)mesh_now, (int)drift);
+}
+
+//************************************[ channels ]******************************
+/* MeshCore keeps group channels in RAM and nowhere else, so a channel added
+ * from an app lasted until the next restart and then quietly was not there any
+ * more. Name and key are all that need keeping - setChannel() recomputes the
+ * hash it matches on from the key. */
+#define CHANNEL_NAME_LEN 32
+#define CHANNEL_KEY_LEN  16
+
+struct stored_channel_t {
+    char    name[CHANNEL_NAME_LEN];
+    uint8_t key[CHANNEL_KEY_LEN];
+};
+
+void mesh_net_save_channels(void)
+{
+    if(the_mesh == NULL) return;
+
+    stored_channel_t saved[MAX_GROUP_CHANNELS];
+    memset(saved, 0, sizeof(saved));
+
+    for(int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+        ChannelDetails ch;
+        if(!the_mesh->getChannel(i, ch)) continue;
+
+        snprintf(saved[i].name, sizeof(saved[i].name), "%s", ch.name);
+        memcpy(saved[i].key, ch.channel.secret, CHANNEL_KEY_LEN);
+    }
+
+    Preferences prefs;
+    if(!prefs.begin(MESH_PREFS_NAMESPACE, false)) return;
+
+    prefs.putBytes("channels", saved, sizeof(saved));
+    prefs.end();
+
+    Serial.println("[MESH] channels saved");
+}
+
+static void channels_load(void)
+{
+    if(the_mesh == NULL) return;
+
+    stored_channel_t saved[MAX_GROUP_CHANNELS];
+
+    Preferences prefs;
+    if(!prefs.begin(MESH_PREFS_NAMESPACE, true)) return;
+
+    size_t got = prefs.getBytes("channels", saved, sizeof(saved));
+    prefs.end();
+
+    if(got != sizeof(saved)) return;   // never saved, or saved by an older build
+
+    for(int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+        // An all-zero key is an empty slot, not a channel with a key of zeroes.
+        bool empty = true;
+        for(int k = 0; k < CHANNEL_KEY_LEN && empty; k++) {
+            if(saved[i].key[k] != 0) empty = false;
+        }
+        if(empty) continue;
+
+        ChannelDetails ch;
+        memset(&ch, 0, sizeof(ch));
+        snprintf(ch.name, sizeof(ch.name), "%s", saved[i].name);
+        memcpy(ch.channel.secret, saved[i].key, CHANNEL_KEY_LEN);
+
+        the_mesh->setChannel(i, ch);
+        Serial.printf("[MESH] channel %d restored: %s\n", i, ch.name);
+    }
 }
 
 //************************************[ task ]**********************************
@@ -824,6 +958,9 @@ bool mesh_net_init(void)
                       public_channel->channel.hash[0], public_channel->channel.hash[1]);
     }
 
+    // After the public channel, so anything an app set can replace it.
+    channels_load();
+
     mesh_radio_t r;
     mesh_net_get_radio(&r);
     radio_driver.setParams(r.freq_mhz, r.bandwidth_khz, r.spreading_factor, r.coding_rate);
@@ -888,7 +1025,7 @@ void mesh_net_set_self_name(const char *name)
  * on their own every few minutes, which is the whole point of the "when I
  * announce" setting: share where you are because you meant to, not because a
  * timer went off in your pocket. */
-static void advert_send(bool deliberate)
+static void advert_send(bool deliberate, bool flood)
 {
     if(!mesh_running || the_mesh == NULL) return;
 
@@ -913,16 +1050,27 @@ static void advert_send(bool deliberate)
     mesh::Packet *pkt = the_mesh->createAdvert(the_mesh->self_id, app_data, len);
     if(pkt == NULL) return;
 
-    the_mesh->sendFlood(pkt);
+    /* Flooded by default, so the whole mesh learns this node exists. Zero hop
+     * is what an app asks for when it only wants whoever is in direct radio
+     * range to hear - introducing yourself to the room rather than the town. */
+    if(flood) the_mesh->sendFlood(pkt);
+    else      the_mesh->sendZeroHop(pkt);
+
     packets_tx++;
 
-    if(with_loc) Serial.printf("[MESH] advertised from %.5f, %.5f\n", lat, lon);
-    else         Serial.println("[MESH] advertised");
+    Serial.printf("[MESH] advertised%s%s", flood ? "" : " to direct neighbours only",
+                  with_loc ? "" : "\n");
+    if(with_loc) Serial.printf(" from %.5f, %.5f\n", lat, lon);
 }
 
 void mesh_net_advertise(void)
 {
     advert_send(true);
+}
+
+void mesh_net_advertise_zero_hop(void)
+{
+    advert_send(true, false);
 }
 
 int mesh_net_node_count(void)
