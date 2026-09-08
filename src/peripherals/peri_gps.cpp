@@ -7,6 +7,33 @@
 /* clang-format off */
 
 TinyGPSPlus gps;
+
+/* Satellites in view, which is a different question from satellites in use.
+ *
+ * The count the rest of this file reports comes from GGA and means "used in the
+ * fix" - so it is zero both when the antenna hears nothing and when it hears
+ * plenty but cannot get the four it needs to place itself. Those want opposite
+ * responses: one is a hardware or sky problem, the other is only patience. GSV
+ * carries the number in view, and its third field is that number.
+ *
+ * A multi-constellation receiver sends one GSV per constellation, so these are
+ * summed rather than taken one at a time. */
+static TinyGPSCustom gps_in_view(gps, "GPGSV", 3);
+static TinyGPSCustom glo_in_view(gps, "GLGSV", 3);
+static TinyGPSCustom gal_in_view(gps, "GAGSV", 3);
+static TinyGPSCustom gnss_in_view(gps, "GNGSV", 3);
+
+static int satellites_in_view(void)
+{
+    int total = 0;
+
+    if(gps_in_view.isValid())  total += atoi(gps_in_view.value());
+    if(glo_in_view.isValid())  total += atoi(glo_in_view.value());
+    if(gal_in_view.isValid())  total += atoi(gal_in_view.value());
+    if(gnss_in_view.isValid()) total += atoi(gnss_in_view.value());
+
+    return total;
+}
 static bool GPS_Recovery();
 bool setupGPS();
 void displayInfo();
@@ -90,9 +117,11 @@ void gps_task(void *param)
         if (millis() > next_report) {
             next_report = millis() + 10000;
 
-            Serial.printf("[GPS] %u chars, %u good sentences, %u bad checksums, %u sats\n",
+            Serial.printf("[GPS] %u chars, %u good sentences, %u bad checksums, "
+                          "%d in view, %u in use\n",
                           (unsigned)gps.charsProcessed(), (unsigned)gps.passedChecksum(),
-                          (unsigned)gps.failedChecksum(), (unsigned)gps_vsat);
+                          (unsigned)gps.failedChecksum(), satellites_in_view(),
+                          (unsigned)gps_vsat);
         }
 
         delay(1);
@@ -263,9 +292,11 @@ void displayInfo()
          * receiver has decoded the clock off a satellite it can hear but cannot
          * hear the four it needs to place itself. Indoors, that can go on
          * indefinitely. */
-        Serial.printf("[GPS] no fix yet, %u sats, %s\n", (unsigned)gps_vsat,
-                      gps.time.isValid() ? "but satellite time is being received"
-                                         : "and no satellite time either");
+        int in_view = satellites_in_view();
+
+        Serial.printf("[GPS] no fix yet, %d in view, %s\n", in_view,
+                      in_view == 0 ? "nothing is being heard at all - antenna or sky"
+                                   : "which is not yet the four a position needs");
     }
 }
 
