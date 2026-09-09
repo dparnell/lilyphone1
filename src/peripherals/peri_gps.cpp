@@ -149,11 +149,16 @@ void gps_task_resume(void)
 
 /* Restarts the receiver from nothing.
  *
- * A cold start rather than a nudge: the almanac, the ephemeris and the last
- * known position all go. That is the point of a reset - a receiver that is
- * confused about where it is will go on being confused if you leave it what it
- * thinks it knows - but it also means the next fix takes minutes rather than
- * seconds, because everything has to be downloaded from the satellites again.
+ * A warm start: the ephemeris goes, the almanac and the last known position
+ * stay. Bad ephemeris is what a stuck receiver usually has, and throwing it
+ * away is enough to unstick one - while keeping the almanac is what lets the
+ * next fix take a minute instead of a quarter of an hour, since the almanac is
+ * broadcast slowly and takes over twelve minutes of clear sky to collect again.
+ *
+ * A cold start would discard that too. It is the right tool only for an almanac
+ * that is actually corrupt, which is rare, and the wrong one indoors where the
+ * replacement may never arrive - a "reset" that leaves the receiver worse off
+ * for a quarter of an hour is a trap rather than a repair.
  *
  * The GPS task is the only other user of the serial port, so it is paused for
  * the duration rather than raced with. This blocks its caller for over a
@@ -169,11 +174,11 @@ bool gps_reset(void)
 
     gps_task_suspend();
 
-    /* UBX-CFG-RST: clear everything in battery-backed RAM, controlled software
-     * reset. Not acknowledged - by the time it would answer it has restarted -
-     * so there is nothing to wait for but the receiver coming back. */
+    /* UBX-CFG-RST: clear the ephemeris only, controlled software reset. Not
+     * acknowledged - by the time it would answer it has restarted - so there is
+     * nothing to wait for but the receiver coming back. */
     const uint8_t cfg_rst[] = {
-        0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x01, 0x00, 0x0D, 0x5F
+        0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x01, 0x00, 0x01, 0x00, 0x10, 0x6A
     };
     SerialGPS.write(cfg_rst, sizeof(cfg_rst));
     delay(1200);
@@ -200,7 +205,7 @@ bool gps_reset(void)
 
     gps_task_resume();
 
-    Serial.printf("[GPS] reset %s\n", ok ? "done; a first fix will take a few minutes"
+    Serial.printf("[GPS] reset %s\n", ok ? "done; the next fix should take about a minute"
                                           : "failed, the receiver did not answer");
     return ok;
 }

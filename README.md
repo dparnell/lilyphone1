@@ -266,10 +266,11 @@ The module's second LED is its power indicator and is not under software
 control at all.
 
 **GPS.** A live readout of position, speed, satellites and time, with a reset
-button in the corner. The reset is a cold start - the receiver throws away its
-almanac, its ephemeris and its last known position - which is what to reach for
-when it has got itself confused, at the cost of a first fix that takes minutes
-rather than seconds.
+button in the corner. The reset is a warm start: the ephemeris goes, the almanac
+and the last known position stay. Bad ephemeris is what a stuck receiver usually
+has, and discarding it is enough to unstick one — while keeping the almanac is
+what lets the next fix take about a minute instead of the quarter of an hour it
+takes to collect a new one from the satellites.
 
 **Storage.** *Settings > Storage* browses both filesystems. They are nothing
 alike: internal flash is soldered on, holds the contacts, the messages and the

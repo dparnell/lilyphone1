@@ -2630,8 +2630,8 @@ static void scr3_reset_event(lv_event_t *e)
 
     bool ok = ui_gps_reset();
 
-    ui_notice("GPS", ok ? "Receiver restarted.\n\nIt has forgotten where it was, so the "
-                          "first fix will take a few minutes."
+    ui_notice("GPS", ok ? "Receiver restarted.\n\nIt kept what it knows of the satellites, "
+                          "so a fix should come back within a minute or so."
                         : "The receiver did not answer.");
 }
 
