@@ -272,6 +272,13 @@ has, and discarding it is enough to unstick one — while keeping the almanac is
 what lets the next fix take about a minute instead of the quarter of an hour it
 takes to collect a new one from the satellites.
 
+The home screen's status bar carries the receiver's state: nothing when it is
+not being read, a plain satellite when it is searching, and the satellite with
+the number of satellites in use once it has a fix. Not being read is its own
+state worth showing — the receiver is only powered up while the GPS screen is
+open or while the mesh wants a position, so a missing icon means nobody asked,
+not that nothing was found.
+
 **Storage.** *Settings > Storage* browses both filesystems. They are nothing
 alike: internal flash is soldered on, holds the contacts, the messages and the
 mesh identity, and cannot be read anywhere else; the SD card can be taken out

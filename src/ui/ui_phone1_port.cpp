@@ -167,6 +167,14 @@ bool ui_gps_reset(void)
 {
     return gps_reset();
 }
+bool ui_gps_is_running(void)
+{
+    return gps_is_running();
+}
+bool ui_gps_has_fix(void)
+{
+    return gps_has_fix();
+}
 void ui_gps_get_coord(double *lat, double *lng)
 {
     gps_get_coord(lat, lng);

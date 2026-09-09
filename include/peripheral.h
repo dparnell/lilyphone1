@@ -67,6 +67,10 @@ void gps_task_resume(void);
 /* Cold starts the receiver and reconfigures it. Blocks for over a second,
  * and the first fix afterwards takes minutes rather than seconds. */
 bool gps_reset(void);
+/* Whether the receiver is being read, and whether it currently knows where it
+ * is. Not the same question: it is only read while something wants it. */
+bool gps_is_running(void);
+bool gps_has_fix(void);
 void gps_get_coord(double *lat, double *lng);
 void gps_get_data(uint16_t *year, uint8_t *month, uint8_t *day);
 void gps_get_time(uint8_t *hour, uint8_t *minute, uint8_t *second);

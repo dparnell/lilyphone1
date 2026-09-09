@@ -382,6 +382,7 @@ static lv_obj_t * menu_taskbar_wifi = NULL;
 static lv_obj_t * menu_taskbar_signal = NULL;
 static lv_obj_t * menu_taskbar_unread = NULL;
 static lv_obj_t * menu_taskbar_companion = NULL;
+static lv_obj_t * menu_taskbar_gps = NULL;
 
 static int page_num = 0;
 static int page_curr = 0;
@@ -547,6 +548,14 @@ static void create0(lv_obj_t *parent)
     lv_label_set_text_fmt(menu_taskbar_companion, "%s", LV_SYMBOL_BLUETOOTH);
     lv_obj_add_flag(menu_taskbar_companion, LV_OBJ_FLAG_HIDDEN);
 
+    /* The receiver, when it is being read. Searching and fixed are worth
+     * distinguishing at a glance - one is waiting, the other is working - so a
+     * fix carries the satellite count and a search does not. */
+    menu_taskbar_gps = lv_label_create(status_parent);
+    lv_obj_set_style_text_font(menu_taskbar_gps, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_label_set_text(menu_taskbar_gps, LV_SYMBOL_GPS);
+    lv_obj_add_flag(menu_taskbar_gps, LV_OBJ_FLAG_HIDDEN);
+
     menu_taskbar_signal = lv_label_create(status_parent);
     lv_label_set_text_fmt(menu_taskbar_signal, "%s", LV_SYMBOL_CALL);
     lv_obj_add_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
@@ -574,6 +583,14 @@ static void create0(lv_obj_t *parent)
 
     if(taskbar_statue[TASKBAR_ID_SIGNAL])
         lv_obj_clear_flag(menu_taskbar_signal, LV_OBJ_FLAG_HIDDEN);
+
+    if(taskbar_statue[TASKBAR_ID_GPS]) {
+        if(taskbar_statue[TASKBAR_ID_GPS] >= 100) {
+            lv_label_set_text_fmt(menu_taskbar_gps, LV_SYMBOL_GPS "%d",
+                                  taskbar_statue[TASKBAR_ID_GPS] - 100);
+        }
+        lv_obj_clear_flag(menu_taskbar_gps, LV_OBJ_FLAG_HIDDEN);
+    }
 
     if(taskbar_statue[TASKBAR_ID_COMPANION]) {
         lv_label_set_text(menu_taskbar_companion,
@@ -6362,6 +6379,34 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
             lv_obj_add_flag(menu_taskbar_unread, LV_OBJ_FLAG_HIDDEN);
         }
         taskbar_statue[TASKBAR_ID_UNREAD] = unread;
+    }
+
+    /* 0 not running, 1 searching, 100 + satellites once it has a fix - one
+     * number so the usual "has anything changed" test still works. */
+    uint16_t gps_state = 0;
+    if(ui_gps_is_running()) {
+        if(ui_gps_has_fix()) {
+            uint32_t vsat = 0;
+            ui_gps_get_satellites(&vsat);
+            gps_state = 100 + (vsat > 99 ? 99 : vsat);
+        } else {
+            gps_state = 1;
+        }
+    }
+
+    if(taskbar_statue[TASKBAR_ID_GPS] != gps_state)
+    {
+        if(gps_state == 0) {
+            lv_obj_add_flag(menu_taskbar_gps, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            if(gps_state >= 100) {
+                lv_label_set_text_fmt(menu_taskbar_gps, LV_SYMBOL_GPS "%d", gps_state - 100);
+            } else {
+                lv_label_set_text(menu_taskbar_gps, LV_SYMBOL_GPS);
+            }
+            lv_obj_clear_flag(menu_taskbar_gps, LV_OBJ_FLAG_HIDDEN);
+        }
+        taskbar_statue[TASKBAR_ID_GPS] = gps_state;
     }
 
     if(taskbar_statue[TASKBAR_ID_COMPANION] != (uint16_t)companion)

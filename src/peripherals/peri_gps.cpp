@@ -147,6 +147,21 @@ void gps_task_resume(void)
     if(gps_handle) vTaskResume(gps_handle);
 }
 
+/* Whether the receiver is being read at all. It is suspended unless the GPS
+ * screen is open or the mesh wants a position, so "no fix" and "not looking"
+ * are different things and a status icon has to tell them apart. */
+bool gps_is_running(void)
+{
+    return gps_handle != NULL && eTaskGetState(gps_handle) != eSuspended;
+}
+
+/* A position from the last few seconds. Validity alone is not enough - it stays
+ * true on the last fix long after the receiver has lost the sky. */
+bool gps_has_fix(void)
+{
+    return gps.location.isValid() && gps.location.age() < 10000;
+}
+
 /* Restarts the receiver from nothing.
  *
  * A warm start: the ephemeris goes, the almanac and the last known position
