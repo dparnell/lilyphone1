@@ -55,6 +55,12 @@ bool mesh_companion_link_saved(void);
  * up. */
 void mesh_companion_hold_off(void);
 
+/* Whether the node the link speaks for still has a radio. Powering the LoRa
+ * module down leaves an app connected to something that can no longer send or
+ * receive anything, so the link is taken down with it - and brought back when
+ * the power is, without the setting having changed in between. */
+void mesh_companion_set_node_powered(bool powered);
+
 /* Starts the remembered link. Called once during startup, after the display has
  * taken the memory it needs, so that what is left is what the radio gets. */
 void mesh_companion_boot(void);

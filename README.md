@@ -165,6 +165,13 @@ interface.
 One link at a time, and turning Bluetooth off only stops it advertising: the
 Bluetooth stack keeps the memory it claimed until the next restart.
 
+**Switching the LoRa module off takes the link down with it.** An app connected
+to a node whose radio has gone is connected to something that can no longer send
+or hear anything. Powering the radio back on restores the link, without the
+setting having changed in between — the same applies to the GPS icon on the home
+screen, which disappears when that module is powered down rather than sitting
+there searching for a receiver that is switched off.
+
 **The link costs some drawing speed, and only while it is on.** Both radio
 stacks want more fast internal memory than is left once the display has taken a
 full screen buffer out of it — that buffer is a byte per pixel, the largest

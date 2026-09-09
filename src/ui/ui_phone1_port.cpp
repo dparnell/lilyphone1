@@ -11,6 +11,8 @@
 #include "peripheral.h"
 #include "WiFi.h"
 #include "modem_service.h"
+#include "mesh_net.h"
+#include "mesh_companion.h"
 #include <Preferences.h>
 #include <ctype.h>
 #include <TouchDrvCSTXXX.hpp>
@@ -70,12 +72,24 @@ void ui_setting_set_gps_status(bool on)
     // enable GPS module power
     digitalWrite(BOARD_GPS_EN, on);
     default_gps_status = on;
+
+    /* There is nothing to read from an unpowered receiver, and a task polling a
+     * dead port only burns CPU and fills the log with "no fix". Coming back, it
+     * is the mesh that decides whether the receiver is wanted running. */
+    if(!on)                        gps_task_suspend();
+    else if(mesh_net_wants_gps())  gps_task_resume();
 }
 void ui_setting_set_lora_status(bool on)
 {
     // enable LORA module power
     digitalWrite(BOARD_LORA_EN, on);
     default_lora_status = on;
+
+    /* A companion app connected to a node whose radio has just been switched
+     * off is connected to something that can no longer send or hear anything.
+     * The link goes down with the radio and comes back with it, without the
+     * user's choice of link having changed in between. */
+    mesh_companion_set_node_powered(on);
 }
 void ui_setting_set_gyro_status(bool on)
 {

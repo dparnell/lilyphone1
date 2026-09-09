@@ -6384,7 +6384,12 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
     /* 0 not running, 1 searching, 100 + satellites once it has a fix - one
      * number so the usual "has anything changed" test still works. */
     uint16_t gps_state = 0;
-    if(ui_gps_is_running()) {
+
+    /* Powered down as well as running: the GPS screen resumes the task on its
+     * own, so a module with no power can still have something reading its port
+     * - and an icon that sat there searching forever would be describing a
+     * receiver that is not switched on. */
+    if(ui_gps_is_running() && ui_setting_get_gps_status()) {
         if(ui_gps_has_fix()) {
             uint32_t vsat = 0;
             ui_gps_get_satellites(&vsat);

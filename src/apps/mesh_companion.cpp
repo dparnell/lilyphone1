@@ -173,6 +173,7 @@ static BaseSerialInterface *active_link = NULL;
 static int  link_mode    = MESH_LINK_OFF;
 static int  link_wanted  = MESH_LINK_OFF;
 static bool link_held_off = false;  // by a key held at boot, for this boot only
+static bool link_blocked  = false;  // the LoRa radio it speaks for is powered down
 static bool ble_started  = false;   // BLEDevice::init() is a one-way door
 static bool wifi_started = false;
 
@@ -633,13 +634,24 @@ static void link_start_wifi(void)
                   ap_ssid, open_network ? " (open)" : "", link_address);
 }
 
+/* What the link should be right now, as against what was asked for. A key held
+ * at boot and a powered-down radio both override the setting without changing
+ * it, so that switching either back restores what the user chose. */
+static int link_effective(void)
+{
+    if(link_held_off || link_blocked) return MESH_LINK_OFF;
+    return link_wanted;
+}
+
 static void link_apply(void)
 {
-    if(link_wanted == link_mode) return;
+    int target = link_effective();
+
+    if(target == link_mode) return;
 
     link_stop();
 
-    if(link_wanted == MESH_LINK_OFF) {
+    if(target == MESH_LINK_OFF) {
         Serial.println("[LINK] off");
         if(link_latched) {
             latch_clear();
@@ -651,11 +663,11 @@ static void link_apply(void)
     // Written down before the attempt, so that a boot which does not come back
     // leaves evidence of what was being tried. Rubbed out by companion_service()
     // once the link has been up long enough to call it good.
-    latch_set(link_wanted);
+    latch_set(target);
     link_latched = true;
 
-    if(link_wanted == MESH_LINK_BLE) link_start_ble();
-    else                             link_start_wifi();
+    if(target == MESH_LINK_BLE) link_start_ble();
+    else                        link_start_wifi();
 
     if(link_mode == MESH_LINK_OFF) {
         // Refused rather than crashed, so there is nothing to warn about later.
@@ -1648,7 +1660,24 @@ bool mesh_companion_link_saved(void)
 {
     // No node to drive, or told not to this time, means no reason to spend the
     // memory on a link - including the display's fast drawing buffer.
-    return chat_mesh != NULL && link_wanted != MESH_LINK_OFF && !link_held_off;
+    return chat_mesh != NULL && link_effective() != MESH_LINK_OFF;
+}
+
+void mesh_companion_set_node_powered(bool powered)
+{
+    if(link_blocked == !powered) return;
+
+    link_blocked = !powered;
+
+    if(link_blocked) {
+        link_set_detail("the LoRa radio is switched off");
+        Serial.println("[LINK] the radio was powered down, so the link goes with it");
+    } else {
+        link_set_detail("");
+        Serial.println("[LINK] the radio is back; restoring the link");
+    }
+
+    link_request();
 }
 
 void mesh_companion_boot(void)
