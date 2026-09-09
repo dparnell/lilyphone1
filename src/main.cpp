@@ -474,14 +474,18 @@ void setup() {
   pinMode(BOARD_6609_EN, OUTPUT);         // enable 7682 module
   pinMode(BOARD_LORA_EN, OUTPUT);         // enable LORA module
   pinMode(BOARD_GPS_EN, OUTPUT);          // enable GPS module
-  pinMode(BOARD_1V8_EN, OUTPUT);          // enable gyroscope module
+  pinMode(BOARD_1V8_EN, OUTPUT);          // 1.8V sensor rail
   pinMode(BOARD_A7682E_PWRKEY, OUTPUT); 
   digitalWrite(BOARD_KEYBOARD_LED, LOW);
   digitalWrite(BOARD_MOTOR_PIN, LOW);
   digitalWrite(BOARD_6609_EN, HIGH);
   digitalWrite(BOARD_LORA_EN, HIGH);
   digitalWrite(BOARD_GPS_EN, HIGH);
-  digitalWrite(BOARD_1V8_EN, HIGH);
+  /* Down, not up. The only parts on this rail are the LTR-553ALS and a BHI260AP
+   * motion hub that nothing reads; LTR553_init() raises it to ask whether a
+   * light sensor is there and puts it back if none answers, so a board with
+   * neither fitted never powers it at all. */
+  digitalWrite(BOARD_1V8_EN, LOW);
   digitalWrite(BOARD_A7682E_PWRKEY, HIGH);
 
   // LORA、SD、EPD use the same SPI, in order to avoid mutual influence;
@@ -528,8 +532,9 @@ void setup() {
    * touch.setPins() releases its reset, and a part held in reset does not
    * acknowledge. Absence here is only evidence about parts that are powered and
    * out of reset by now. */
-  Serial.printf("%d device%s answered; parts still held in reset do not appear,\n"
-                "which is why the touch panel is not among them\n",
+  Serial.printf("%d device%s answered. Parts held in reset do not appear, which is\n"
+                "why the touch panel is not among them, and neither does anything on\n"
+                "the 1.8V sensor rail, which is still down at this point\n",
                 nDevices, nDevices == 1 ? "" : "s");
 
   Serial.printf(" ------------- SPIFFS ------------- \n");

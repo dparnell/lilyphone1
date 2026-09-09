@@ -27,7 +27,6 @@ volatile bool default_keypad_light = false;
 volatile bool default_motor_status = false;
 volatile bool default_gps_status = true;
 volatile bool default_lora_status = true;
-volatile bool default_gyro_status = true;
 volatile bool default_a7682_status = true;
 
 // Notification preferences, persisted in NVS.
@@ -94,11 +93,12 @@ void ui_setting_set_lora_status(bool on)
     // And the mesh task stops driving a radio that is not there.
     mesh_net_set_powered(on);
 }
-void ui_setting_set_gyro_status(bool on)
+void ui_setting_set_sensor_status(bool on)
 {
-    // enable gyroscope module power
-    digitalWrite(BOARD_1V8_EN, on);
-    default_gyro_status = on;
+    /* The 1.8V sensor rail. No local copy of the state: the driver that owns
+     * the rail decides whether it comes up at boot at all, so a mirror here
+     * would start out disagreeing with it. */
+    sensor_rail_set(on);
 }
 void ui_setting_set_a7682_status(bool on)
 {
@@ -133,9 +133,9 @@ bool ui_setting_get_lora_status(void)
 {
     return default_lora_status;
 }
-bool ui_setting_get_gyro_status(void)
+bool ui_setting_get_sensor_status(void)
 {
-    return default_gyro_status;
+    return sensor_rail_is_on();
 }
 bool ui_setting_get_a7682_status(void)
 {
@@ -547,9 +547,9 @@ bool ui_setting_get_ear_detect(void) { return prox_enabled; }
 
 bool ui_setting_ear_detect_available(void)
 {
-    /* The sensor sits on the 1.8V rail that the gyroscope switch controls, so
+    /* The sensor sits on the 1.8V rail that the sensor switch controls, so
      * turning that off takes the proximity sensor with it. */
-    return peri_init_st[E_PERI_LTR_553ALS] && default_gyro_status;
+    return peri_init_st[E_PERI_LTR_553ALS] && sensor_rail_is_on();
 }
 
 /* Shown as a value rather than a switch, so the row can report that there is

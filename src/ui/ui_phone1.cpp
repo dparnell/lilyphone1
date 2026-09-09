@@ -2387,7 +2387,7 @@ static ui_setting_handle setting_handle_list[] = {
     {.name = "Motor Status",     .icon = LV_SYMBOL_BELL,     .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_motor_status, .get_cb = ui_setting_get_motor_status},
     {.name = "Power GPS",        .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gps_status,   .get_cb = ui_setting_get_gps_status},
     {.name = "Power Lora",       .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_lora_status,  .get_cb = ui_setting_get_lora_status},
-    {.name = "Power Gyro",       .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_gyro_status,  .get_cb = ui_setting_get_gyro_status},
+    {.name = "Power Sensors",    .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_sensor_status,.get_cb = ui_setting_get_sensor_status},
     {.name = "Power A7682",      .icon = LV_SYMBOL_POWER,    .type=UI_SETTING_TYPE_SW,  .set_cb = ui_setting_set_a7682_status, .get_cb = ui_setting_get_a7682_status},
     {.name = "Storage",          .icon = LV_SYMBOL_SD_CARD,  .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN17_ID},
     {.name = "About System",     .icon = LV_SYMBOL_FILE,     .type=UI_SETTING_TYPE_SUB, .sub_id = SCREEN2_2_ID},

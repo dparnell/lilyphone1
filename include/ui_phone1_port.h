@@ -44,7 +44,7 @@ void ui_setting_set_keypad_light(bool on);
 void ui_setting_set_motor_status(bool on);
 void ui_setting_set_gps_status(bool on);
 void ui_setting_set_lora_status(bool on);
-void ui_setting_set_gyro_status(bool on);
+void ui_setting_set_sensor_status(bool on);
 void ui_setting_set_a7682_status(bool on);
 
 /* Notification preferences. Unlike the switches above these persist, since a
@@ -106,7 +106,7 @@ bool ui_setting_get_keypad_light(void);
 bool ui_setting_get_motor_status(void);
 bool ui_setting_get_gps_status(void);  
 bool ui_setting_get_lora_status(void); 
-bool ui_setting_get_gyro_status(void); 
+bool ui_setting_get_sensor_status(void);
 bool ui_setting_get_a7682_status(void);
 
 // setting - > About System
@@ -171,7 +171,6 @@ int ui_input_get_touch_coord(int *x, int *y);
 int ui_input_get_keypay_val(char *v);
 void ui_input_set_keypay_flag(void);
 int ui_other_get_LTR(int *ch0, int *ch1, int *ps);
-int ui_other_get_gyro(float *gyro_x, float *gyro_y, float *gyro_z);
 
 // [ screen 8 ] --- telephony
 /* Thin wrappers over the modem service so the UI keeps talking to one layer.

@@ -18,6 +18,23 @@ const char *LTR553_status(void)
     return ltr553_why;
 }
 
+/* Whether the 1.8V rail is up. This part is the only thing left on it, so the
+ * rail is no longer switched on unconditionally at boot - it is raised long
+ * enough to ask whether a sensor is there, and dropped again if none is. */
+static bool rail_on = false;
+
+void sensor_rail_set(bool on)
+{
+    pinMode(BOARD_1V8_EN, OUTPUT);
+    digitalWrite(BOARD_1V8_EN, on ? HIGH : LOW);
+    rail_on = on;
+}
+
+bool sensor_rail_is_on(void)
+{
+    return rail_on;
+}
+
 static bool ltr553_answers(void)
 {
     Wire.beginTransmission(LTR553_SLAVE_ADDRESS);
@@ -31,12 +48,10 @@ bool LTR553_init(void)
      * is not fitted and one that is fitted and answering but that the driver
      * gave up on, and those want very different responses. */
     if (!ltr553_answers()) {
-        /* A second chance with the sensor supply explicitly up. BOARD_1V8_EN
-         * switches the 1.8V rail - it is named for the gyroscope, but this part
-         * sits on it too - and something just given power needs a moment before
-         * it will answer for itself. */
-        pinMode(BOARD_1V8_EN, OUTPUT);
-        digitalWrite(BOARD_1V8_EN, HIGH);
+        /* Which is the ordinary case now rather than a fallback: the rail is
+         * down when this runs, and something just given power needs a moment
+         * before it will answer for itself. */
+        sensor_rail_set(true);
         delay(50);
 
         if (!ltr553_answers()) {
@@ -44,10 +59,14 @@ bool LTR553_init(void)
                      "nothing answers at 0x%02X even with the 1.8V rail up",
                      LTR553_SLAVE_ADDRESS);
             Serial.printf("[LTR553] %s\n", ltr553_why);
+
+            /* Nothing else is on this rail, so put it back down rather than
+             * spending current on an empty footprint for the rest of the run. */
+            sensor_rail_set(false);
             return false;
         }
 
-        Serial.println("[LTR553] answered only after the 1.8V rail was re-enabled");
+        Serial.println("[LTR553] answered once the 1.8V rail was brought up");
     }
 
     if (!als.begin(Wire, LTR553_SLAVE_ADDRESS, BOARD_I2C_SDA, BOARD_I2C_SCL)) {

@@ -17,7 +17,7 @@ stay out of the way when it is in a pocket.
 | Display | 3.1" 240×320 e-paper, 1 bit per pixel (GDEQ031T10) |
 | Input | CST328 touch panel, TCA8418 physical keyboard |
 | Cellular | A7682E modem — voice, SMS, network time. Its WiFi is receive-only (used for positioning), so it cannot act as an access point |
-| Also fitted | SX1262 LoRa, u-blox GPS, BQ25896 charger, BQ27220 fuel gauge, LTR-553ALS, BHI260AP |
+| Also fitted | SX1262 LoRa, u-blox GPS, BQ25896 charger, BQ27220 fuel gauge, LTR-553ALS (absent on this unit), BHI260AP (unused and unpowered) |
 
 ## What it does
 
@@ -255,6 +255,19 @@ full-screen refresh of its own, so this is close to free.
 call held to your ear is a call being hung up and dialled into by the side of
 your head. With *Ear Detect* on, the proximity sensor suppresses the touch panel
 while the phone is against a face during a call.
+
+**The BHI260AP motion hub is not used, and is no longer powered.** It offers an
+accelerometer, a gyroscope and gesture detection, and nothing in this firmware
+ever read any of it - so its driver was removed and the 1.8V rail it sits on now
+starts switched off, rather than supplying a chip that does nothing for the life
+of the battery. The rail is raised only long enough for the light sensor to be
+looked for, and dropped again when none answers. It is not a compass: the hub
+was asked directly and has no magnetometer, so a heading is only available from
+GPS course over ground, and only while moving.
+
+The settings switch that used to read *Power Gyro* now reads *Power Sensors*,
+which is what it always actually did - it switches that 1.8V rail, and the light
+and proximity sensor is the only thing left on it.
 
 **On the board this was written against the setting reads "No sensor".** The
 LTR-553ALS does not answer on the I2C bus at all - not cold, and not with its

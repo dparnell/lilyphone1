@@ -18,7 +18,6 @@ enum {
     E_PERI_BQ27220,
     E_PERI_SD,
     E_PERI_GPS,
-    E_PERI_BHI260AP,
     E_PERI_LTR_553ALS,
     E_PERI_A7682E,
     E_PERI_INK_SCREEN,
@@ -39,18 +38,12 @@ bool keypad_init(int address);
 bool keypad_boot_key_held(char c);
 void keypad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data);
 
-// gyro
-bool BHI260AP_init(void);
-void BHI260AP_get_val(int val_type, float *x, float *y, float *z);
-
-/* Whether this board has a magnetometer wired to the sensor hub. It is an
- * external part on the hub's secondary bus, so nothing but the hub can say. */
-bool BHI260AP_has_compass(void);
-
-/* Heading, pitch and roll in degrees, from the hub's own fusion of all three
- * sensors - already corrected for tilt and for the iron around it. False when
- * there is no magnetometer, in which case there is no heading to be had. */
-bool BHI260AP_get_heading(float *heading, float *pitch, float *roll);
+/* The 1.8V sensor rail. It fed two parts: the LTR-553ALS below, and a BHI260AP
+ * motion hub that nothing in this firmware ever read - so the hub's driver was
+ * removed and the rail now comes up only if a light sensor answers on it. The
+ * board still carries the hub; it simply has no power and no code. */
+void sensor_rail_set(bool on);
+bool sensor_rail_is_on(void);
 
 // LTR553
 bool LTR553_init(void);
