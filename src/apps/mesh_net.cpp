@@ -881,6 +881,45 @@ void mesh_net_set_custom(float freq_mhz, float bandwidth_khz,
 // Defined with the rest of the advert handling, below the task that calls it.
 static void advert_send(bool deliberate, bool flood = true);
 
+//************************************[ power ]*********************************
+static volatile bool radio_powered = true;
+static volatile bool radio_repower = false;
+
+/* Everything the SX1262 needs told to it before it is any use. Run at startup
+ * and again whenever the module has been switched off and on, because a radio
+ * without power keeps none of it. */
+static bool radio_bring_up(void)
+{
+    if(!radio.std_init(&radio_spi)) {
+        Serial.println("[MESH] the radio would not start");
+        return false;
+    }
+
+    radio_driver.begin();
+
+    mesh_radio_t r;
+    mesh_net_get_radio(&r);
+    radio_driver.setParams(r.freq_mhz, r.bandwidth_khz, r.spreading_factor, r.coding_rate);
+    radio.setOutputPower(tx_power_dbm);
+
+    return true;
+}
+
+void mesh_net_set_powered(bool on)
+{
+    if(radio_powered == on) return;
+
+    radio_powered = on;
+    if(on) radio_repower = true;   // the task does the work; SPI is its business
+
+    Serial.printf("[MESH] radio %s\n", on ? "powered up" : "powered down");
+}
+
+bool mesh_net_is_powered(void)
+{
+    return radio_powered;
+}
+
 //************************************[ the clock ]*****************************
 /* Keeping the mesh's clock in step with the phone's.
  *
@@ -989,6 +1028,25 @@ static void mesh_task(void *param)
     uint32_t next_advert = 0;
 
     for(;;) {
+        /* A radio with no power cannot be driven, and MeshCore would spend the
+         * whole loop failing to talk to it over SPI. */
+        if(!radio_powered) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        if(radio_repower) {
+            radio_repower = false;
+
+            // Give the module a moment to come up before asking it anything.
+            vTaskDelay(pdMS_TO_TICKS(100));
+
+            if(radio_bring_up()) {
+                Serial.println("[MESH] radio back up; announcing again");
+                advert_send(false);
+            }
+        }
+
         if(region_pending) {
             mesh_radio_t r;
             mesh_net_get_radio(&r);

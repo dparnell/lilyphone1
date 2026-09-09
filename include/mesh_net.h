@@ -63,6 +63,13 @@ typedef struct {
 bool mesh_net_init(void);
 bool mesh_net_is_running(void);
 
+/* Whether the SX1262 has power. The mesh task stops driving it when it does
+ * not, and brings the radio back up from scratch when it returns - a radio that
+ * has been switched off has lost its frequency, its spreading factor and
+ * everything else it was configured with. */
+void mesh_net_set_powered(bool on);
+bool mesh_net_is_powered(void);
+
 /* This node's own name and the first bytes of its public key, which is how it
  * appears to everyone else. */
 void mesh_net_get_self_name(char *buf, int len);

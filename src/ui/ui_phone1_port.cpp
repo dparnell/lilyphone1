@@ -90,6 +90,9 @@ void ui_setting_set_lora_status(bool on)
      * The link goes down with the radio and comes back with it, without the
      * user's choice of link having changed in between. */
     mesh_companion_set_node_powered(on);
+
+    // And the mesh task stops driving a radio that is not there.
+    mesh_net_set_powered(on);
 }
 void ui_setting_set_gyro_status(bool on)
 {
@@ -103,6 +106,10 @@ void ui_setting_set_a7682_status(bool on)
     digitalWrite(BOARD_6609_EN, on);
     digitalWrite(BOARD_A7682E_PWRKEY, on);
     default_a7682_status = on;
+
+    // The task that owns the serial port stops using it, and sets the modem up
+    // again from scratch when it comes back.
+    modem_set_powered(on);
 }
 
 // get function
@@ -540,7 +547,9 @@ bool ui_setting_get_ear_detect(void) { return prox_enabled; }
 
 bool ui_setting_ear_detect_available(void)
 {
-    return peri_init_st[E_PERI_LTR_553ALS];
+    /* The sensor sits on the 1.8V rail that the gyroscope switch controls, so
+     * turning that off takes the proximity sensor with it. */
+    return peri_init_st[E_PERI_LTR_553ALS] && default_gyro_status;
 }
 
 /* Shown as a value rather than a switch, so the row can report that there is

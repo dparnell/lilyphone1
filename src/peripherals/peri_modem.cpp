@@ -1474,6 +1474,18 @@ static bool modem_refresh_status(void)
     return true;
 }
 
+/* Set from the settings screen. Read by the task on every pass, which is why it
+ * is volatile rather than guarded - a stale read costs one more iteration. */
+static volatile bool modem_powered = true;
+
+void modem_set_powered(bool on)
+{
+    if(modem_powered == on) return;
+
+    modem_powered = on;
+    Serial.printf("[MODEM] module %s\n", on ? "powered up" : "powered down");
+}
+
 static void modem_task(void *param)
 {
     char        line[MODEM_LINE_MAX];
@@ -1484,6 +1496,16 @@ static void modem_task(void *param)
     bool        configured     = false;
 
     for(;;) {
+        /* Nothing to say to a module with no power, and every AT command would
+         * spend its full timeout failing. Configured is dropped on the way out:
+         * a modem that has been power cycled has forgotten the character set,
+         * the message format and everything else it was told. */
+        if(!modem_powered) {
+            configured = false;
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+
         if(!configured) {
             if(modem_exec("AT", NULL, 0, 1000)) {
                 Serial.println("[MODEM] configuring");

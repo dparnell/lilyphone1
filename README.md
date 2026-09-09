@@ -165,6 +165,13 @@ interface.
 One link at a time, and turning Bluetooth off only stops it advertising: the
 Bluetooth stack keeps the memory it claimed until the next restart.
 
+**The module power switches in Settings now take their readers with them.**
+Cutting power to the GPS, the LoRa radio or the modem stops whatever was talking
+to it, rather than leaving a task spending its timeouts on a module that is not
+there. Switching one back on sets it up again from scratch, because a module
+that has been switched off keeps nothing it was told — the modem forgets its
+message format, the radio forgets its frequency.
+
 **Switching the LoRa module off takes the link down with it.** An app connected
 to a node whose radio has gone is connected to something that can no longer send
 or hear anything. Powering the radio back on restores the link, without the

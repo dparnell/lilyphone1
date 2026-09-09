@@ -114,6 +114,11 @@ bool modem_udp_receive(uint8_t *buf, uint16_t buf_len, uint16_t *out_len);
 
 /* Runs a raw AT command on the modem task and logs the reply to the monitor.
  * Used by the screens that poke at modem features directly. */
+/* Whether the module has power. The task stops talking to it when it does not,
+ * and sets itself up again from scratch when it comes back - a modem that has
+ * been power cycled has forgotten everything it was told. */
+void     modem_set_powered(bool on);
+
 void     modem_request_at(const char *cmd);
 
 /* Asks the module which of its commands could touch an LED or a pin, by

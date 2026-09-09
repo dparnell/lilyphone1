@@ -222,6 +222,14 @@ The board adapter, radio settings, advertisement handling and the chat engine ar
 
 Numbers are compared by `phone_number_match()` (last 7 digits, digits only), so `+61412345678` / `0412345678` / `412345678` are one contact. Conversations are derived from the log on demand, not stored, so any thread index is only valid until the log changes.
 
+### The module power switches
+
+The settings screen can cut power to the GPS, the LoRa radio, the modem and the 1.8V sensor rail. Each of those has something reading it, and a task talking to an unpowered module is a task spending its timeouts failing - so each power switch takes its reader down with it and brings it back afterwards.
+
+The part that is easy to get wrong is the coming back. **A module that has been switched off keeps nothing**: the modem forgets its character set and message format, the SX1262 forgets its frequency and spreading factor. So neither is simply resumed - `modem_task()` drops `configured`, which sends it back through the setup path it already had for a modem that was still booting, and `mesh_task()` runs `radio_bring_up()` and re-announces the node. Both flags are `volatile` and read once per pass rather than locked; a stale read costs one more iteration and nothing else.
+
+The GPS is the exception in one direction: turning its power back on hands the decision to `mesh_net_wants_gps()`, because the receiver runs only while something wants it, and that is decided in one place already.
+
 ### Storage browser and export
 
 `src/apps/store_export.cpp` is the only thing in the firmware that writes to the SD card; everything else the phone keeps lives in SPIFFS. Both filesystems are `fs::FS`, which is what lets screen 17 walk either through one pointer - but they differ in one way that matters: **SPIFFS `File::name()` returns a full path where SD returns a bare name**, so the browser takes whatever follows the last slash and treats both alike.
