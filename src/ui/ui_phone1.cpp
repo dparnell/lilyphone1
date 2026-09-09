@@ -206,6 +206,37 @@ static lv_obj_t *scr_action_btn_create(lv_obj_t *parent, const char *symbol, lv_
     return btn;
 }
 
+/* Says the module this screen depends on has been switched off.
+ *
+ * Created whether or not it is needed, so a screen can turn it on when the
+ * switch moves underneath it - and taking the space either way keeps the layout
+ * from jumping as it appears.
+ */
+static lv_obj_t *scr_power_note_create(lv_obj_t *parent, lv_coord_t y, const char *text)
+{
+    lv_obj_t *note = lv_label_create(parent);
+
+    lv_obj_set_width(note, lv_pct(94));
+    lv_obj_set_height(note, 16);
+    lv_obj_set_style_text_font(note, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(note, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
+    lv_label_set_text(note, text);
+    lv_obj_align(note, LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_add_flag(note, LV_OBJ_FLAG_HIDDEN);
+
+    return note;
+}
+
+static void scr_power_note_update(lv_obj_t *note, bool powered)
+{
+    if(note == NULL) return;
+
+    if(powered) lv_obj_add_flag(note, LV_OBJ_FLAG_HIDDEN);
+    else        lv_obj_clear_flag(note, LV_OBJ_FLAG_HIDDEN);
+}
+
 /* Scrolling that this panel can keep up with.
  *
  * LVGL gives every object elastic overshoot and momentum. Both keep animating
@@ -391,17 +422,17 @@ static int page_curr = 0;
  * page; the utilities and the two power actions follow. */
 static struct menu_btn menu_btn_list[] = 
 {
-    {SCREEN8_ID,  &img_A7682E,  NULL,                "Phone" ,   23,     13},  // Page one
+    {SCREEN8_ID,  &img_A7682E,  NULL,                "Phone" ,   23,     13,  UI_POWER_MODEM},  // Page one
     {SCREEN12_ID, NULL,         LV_SYMBOL_LIST,      "Contacts", 95,     13},
-    {SCREEN13_ID, NULL,         LV_SYMBOL_ENVELOPE,  "Messages", 167,    13},
+    {SCREEN13_ID, NULL,         LV_SYMBOL_ENVELOPE,  "Messages", 167,    13,  UI_POWER_MODEM},
     {SCREEN2_ID,  &img_setting, NULL,                "Setting",  23,     101},
-    {SCREEN3_ID,  &img_GPS,     NULL,                "GPS",      95,     101},
+    {SCREEN3_ID,  &img_GPS,     NULL,                "GPS",      95,     101, UI_POWER_GPS},
     {SCREEN4_ID,  &img_wifi,    NULL,                "Wifi",     167,    101},
-    {SCREEN1_ID,  &img_lora,    NULL,                "Mesh",     23,     189},
+    {SCREEN1_ID,  &img_lora,    NULL,                "Mesh",     23,     189, UI_POWER_LORA},
     {SCREEN6_ID,  &img_batt,    NULL,                "Battery",  95,     189},
     {SCREEN5_ID,  &img_test,    NULL,                "Test",     167,    189},
 
-    {SCREEN16_ID, NULL,         LV_SYMBOL_WIFI,      "Hotspot",  23,     13},  // Page two
+    {SCREEN16_ID, NULL,         LV_SYMBOL_WIFI,      "Hotspot",  23,     13,  UI_POWER_MODEM},  // Page two
     {SCREEN11_ID, &img_PCM5102, NULL,                "Sleep",    95,     13},
     {SCREEN9_ID,  NULL,         LV_SYMBOL_POWER,     "Shutdown", 167,    13},
 };
@@ -460,6 +491,18 @@ static void menu_get_gesture_dir(int dir, lv_coord_t from_x, lv_coord_t from_y)
     ui_disp_full_refr();
 }
 
+/* Whether the module an app needs is switched on. Apps with no module of their
+ * own - contacts, settings - always are. */
+static bool menu_btn_powered(const struct menu_btn *info)
+{
+    switch(info->power) {
+        case UI_POWER_MODEM: return ui_setting_get_a7682_status();
+        case UI_POWER_LORA:  return ui_setting_get_lora_status();
+        case UI_POWER_GPS:   return ui_setting_get_gps_status();
+        default:             return true;
+    }
+}
+
 static void menu_btn_create(lv_obj_t *parent, struct menu_btn *info)
 {
     lv_obj_t * btn = lv_btn_create(parent);
@@ -498,6 +541,24 @@ static void menu_btn_create(lv_obj_t *parent, struct menu_btn *info)
     }
     lv_label_set_text(label, (info->name));
     lv_obj_set_style_border_width(label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    /* Struck through when the module this app needs has been switched off.
+     * A line rather than a lighter icon, because there is no lighter on a panel
+     * with two colours - and it reads as "not available" the way a crossed-out
+     * anything does. */
+    if(info->power != UI_POWER_NONE) {
+        static lv_point_t stroke[] = { {4, 46}, {46, 4} };
+
+        info->off_mark = lv_line_create(btn);
+        lv_line_set_points(info->off_mark, stroke, 2);
+        lv_obj_set_style_line_width(info->off_mark, 3, LV_PART_MAIN);
+        lv_obj_set_style_line_color(info->off_mark, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_line_rounded(info->off_mark, true, LV_PART_MAIN);
+
+        if(menu_btn_powered(info)) lv_obj_add_flag(info->off_mark, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        info->off_mark = NULL;
+    }
     lv_obj_add_event_cb(btn, menu_btn_event_cb, LV_EVENT_CLICKED, (void *)info);
 }
 
@@ -714,6 +775,7 @@ static scr_lifecycle_t screen0 = {
  * packet counts in the header. */
 static lv_obj_t   *scr1_list   = NULL;
 static lv_obj_t   *scr1_header = NULL;
+static lv_obj_t   *scr1_power  = NULL;
 static lv_timer_t *scr1_timer  = NULL;
 
 /* Which mesh conversation the conversation and compose screens are showing.
@@ -828,6 +890,8 @@ static void scr1_render_header(void)
     mesh_net_get_self_name(name, sizeof(name));
     mesh_net_get_self_key(key, sizeof(key));
 
+    scr_power_note_update(scr1_power, ui_setting_get_lora_status());
+
     lv_label_set_text_fmt(scr1_header, "%s (%s)   rx %u  tx %u",
                           name, key,
                           (unsigned)mesh_net_packets_rx(), (unsigned)mesh_net_packets_tx());
@@ -862,6 +926,8 @@ static void create1(lv_obj_t *parent)
     lv_obj_set_size(scr1_list, lv_pct(96), LV_VER_RES - 56);
     lv_obj_align(scr1_list, LV_ALIGN_BOTTOM_MID, 0, 0);
 
+    scr1_power = scr_power_note_create(parent, 18, "The LoRa radio is switched off");
+
     scr1_populate();
     scr1_render_header();
 
@@ -892,6 +958,7 @@ static void destroy1(void)
 {
     scr1_list   = NULL;
     scr1_header = NULL;
+    scr1_power  = NULL;
 }
 
 static scr_lifecycle_t screen1 = {
@@ -2542,6 +2609,7 @@ static scr_lifecycle_t screen2 = {
 #define line_max 23
 static lv_obj_t *scr3_cont;
 static lv_obj_t *scr3_cnt_lab;
+static lv_obj_t *scr3_power = NULL;
 static lv_timer_t *GPS_loop_timer = NULL;
 
 static void gps_set_line(lv_obj_t *label, const char *str1, const char *str2)
@@ -2581,6 +2649,8 @@ static void scr3_GPS_updata(void)
     static int cnt = 0;
 
     lv_label_set_text_fmt(scr3_cnt_lab, " %05d ", ++cnt);
+
+    scr_power_note_update(scr3_power, ui_setting_get_gps_status());
 
     ui_gps_get_coord(&lat, &lon);
     ui_gps_get_data(&year, &month, &day);
@@ -2683,6 +2753,8 @@ static void create3(lv_obj_t *parent)
     // Left of the reset button, which takes the corner.
     lv_obj_align(scr3_cnt_lab, LV_ALIGN_TOP_RIGHT, -44, 10);
 
+    scr3_power = scr_power_note_create(parent, 30, "The GPS module is switched off");
+
     scr_back_btn_create(parent, ("GPS"), scr3_btn_event_cb);
     scr_action_btn_create(parent, LV_SYMBOL_REFRESH, scr3_reset_event);
 }
@@ -2706,7 +2778,7 @@ static void exit3(void) {
     }
     ui_disp_full_refr();
 }
-static void destroy3(void) { }
+static void destroy3(void) { scr3_power = NULL; }
 
 static scr_lifecycle_t screen3 = {
     .create = create3,
@@ -3874,6 +3946,8 @@ static void scr8_save_event_cb(lv_event_t *e)
     scr_mgr_push(SCREEN12_2_ID, false);
 }
 
+static lv_obj_t *scr8_power = NULL;
+
 static void create8(lv_obj_t *parent)
 {
     scr8_number_ta = lv_textarea_create(parent);
@@ -3903,6 +3977,11 @@ static void create8(lv_obj_t *parent)
     lv_obj_align(btnm1, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(btnm1, scr8_keypad_event, LV_EVENT_VALUE_CHANGED, NULL);
 
+    /* Over the dial pad rather than above the number: this screen is full to
+     * the top edge, and a modem with no power is worth saying loudly enough to
+     * stop somebody wondering why nothing dials. */
+    scr8_power = scr_power_note_create(parent, 18, "The modem is switched off");
+
     scr_back_btn_create(parent, "Phone", scr8_btn_event_cb);
     scr_action_btn_create(parent, LV_SYMBOL_PLUS, scr8_save_event_cb);
 }
@@ -3918,6 +3997,7 @@ static void entry8(void)
 
     lv_group_focus_obj(scr8_number_ta);
     scr8_update_name();
+    scr_power_note_update(scr8_power, ui_setting_get_a7682_status());
     ui_disp_full_refr();
 }
 
@@ -3929,6 +4009,7 @@ static void destroy8(void)
 {
     scr8_number_ta  = NULL;
     scr8_name_label = NULL;
+    scr8_power      = NULL;
 }
 
 static scr_lifecycle_t screen8 = {
@@ -6425,6 +6506,22 @@ static void menu_taskbar_update_timer_cb(lv_timer_t *t)
             lv_obj_add_flag(menu_taskbar_companion, LV_OBJ_FLAG_HIDDEN);
         }
         taskbar_statue[TASKBAR_ID_COMPANION] = companion;
+    }
+
+    /* The switches live in Settings, so this can change while the menu is only
+     * a screen away. Cheap enough to check on the same pass as everything else
+     * up here, and only touches an icon whose state has actually moved. */
+    for(int i = 0; i < (int)MENU_BTN_NUM; i++) {
+        struct menu_btn *b = &menu_btn_list[i];
+        if(b->off_mark == NULL) continue;
+
+        bool hidden  = lv_obj_has_flag(b->off_mark, LV_OBJ_FLAG_HIDDEN);
+        bool powered = menu_btn_powered(b);
+
+        if(powered == hidden) continue;   // already showing the right thing
+
+        if(powered) lv_obj_add_flag(b->off_mark, LV_OBJ_FLAG_HIDDEN);
+        else        lv_obj_clear_flag(b->off_mark, LV_OBJ_FLAG_HIDDEN);
     }
 
     charge = ui_battery_27220_get_input();

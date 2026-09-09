@@ -90,13 +90,24 @@ enum {
     TASKBAR_ID_MAX,
 };
 
+/* Which power switch an app depends on, so its icon can say when the module it
+ * needs has been switched off rather than looking as though it would work. */
+enum {
+    UI_POWER_NONE = 0,
+    UI_POWER_MODEM,
+    UI_POWER_LORA,
+    UI_POWER_GPS,
+};
+
 struct menu_btn {
     uint16_t idx;
     const void *icon;   // bitmap icon, or NULL to fall back to `symbol`
     const char *symbol; // LV_SYMBOL_* drawn in its place
     const char *name;
     lv_coord_t pos_x;
-    lv_coord_t pos_y; 
+    lv_coord_t pos_y;
+    uint8_t    power;     // UI_POWER_*, the module this app needs
+    lv_obj_t  *off_mark;  // struck through while that module has no power
 };
 
 enum{

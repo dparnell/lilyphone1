@@ -165,6 +165,12 @@ interface.
 One link at a time, and turning Bluetooth off only stops it advertising: the
 Bluetooth stack keeps the memory it claimed until the next restart.
 
+**An app whose module is switched off says so.** Its icon on the home screen is
+struck through, and its own screen carries a line naming the module — the Mesh
+screen, the GPS screen and the dialler, which are the three switches with an app
+behind them. Messages and Hotspot share the modem's switch and are struck
+through with the dialler.
+
 **The module power switches in Settings now take their readers with them.**
 Cutting power to the GPS, the LoRa radio or the modem stops whatever was talking
 to it, rather than leaving a task spending its timeouts on a module that is not
