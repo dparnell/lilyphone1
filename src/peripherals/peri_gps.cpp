@@ -76,7 +76,10 @@ bool gps_init(void)
             SerialGPS.updateBaudRate(38400);
         }
     }
-    if(result) {
+    /* Only once. gps_init() is called again when the module is switched back
+     * on - a receiver that has lost power comes back at its defaults and needs
+     * the whole configuring again - but the task it created is still there. */
+    if(result && gps_handle == NULL) {
         Serial.println("GPS Task Create...!");
         gps_task_create();
     }
@@ -137,6 +140,13 @@ void gps_task_create(void)
 /* Guarded, because gps_handle is only set once gps_init() has got as far as
  * creating the task - and vTaskSuspend(NULL) suspends the *calling* task, so
  * asking to pause a GPS that never started would have stopped the UI instead. */
+/* Whether gps_init() has ever got as far as creating the task. False means the
+ * receiver was switched off when the phone booted and was never set up. */
+bool gps_is_started(void)
+{
+    return gps_handle != NULL;
+}
+
 void gps_task_suspend(void)
 {
     if(gps_handle) vTaskSuspend(gps_handle);

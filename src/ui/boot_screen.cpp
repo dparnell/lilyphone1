@@ -41,7 +41,7 @@ extern GxEPD2_BW<GxEPD2_310_GDEQ031T10, GxEPD2_310_GDEQ031T10::HEIGHT> display;
 // How long the panel is left alone between repaints. See the note above.
 #define BOOT_MIN_REDRAW_MS 250
 
-enum { BOOT_PENDING = 0, BOOT_OK, BOOT_FAILED };
+enum { BOOT_PENDING = 0, BOOT_OK, BOOT_FAILED, BOOT_OFF };
 
 static const struct {
     const uint8_t *icon;
@@ -106,11 +106,15 @@ static void draw_cell(int idx)
                            GxEPD_BLACK);
     }
 
-    // A failure gets struck through, which reads at a glance where a different
-    // shade would not - there are only two of those to work with here.
+    /* A failure gets struck through, which reads at a glance where a different
+     * shade would not - there are only two of those to work with here. A module
+     * that is merely switched off gets one stroke of the same cross, which is
+     * the mark the home screen uses for the same thing. */
+    if(state[idx] == BOOT_FAILED || state[idx] == BOOT_OFF) {
+        display.drawLine(bx + 4, cy + BOOT_BOX - 4, bx + BOOT_BOX - 4, cy + 4, GxEPD_BLACK);
+    }
     if(state[idx] == BOOT_FAILED) {
         display.drawLine(bx + 4, cy + 4, bx + BOOT_BOX - 4, cy + BOOT_BOX - 4, GxEPD_BLACK);
-        display.drawLine(bx + 4, cy + BOOT_BOX - 4, bx + BOOT_BOX - 4, cy + 4, GxEPD_BLACK);
     }
 
     // The label sits under the box in the small built-in font: at 60 pixels a
@@ -202,6 +206,15 @@ bool boot_screen_done(int system, bool ok)
     if(!ok) Serial.printf("[BOOT] %s did not start\n", boot_systems[system].label);
 
     return ok;
+}
+
+void boot_screen_off(int system)
+{
+    if(system < 0 || system >= BOOT_SYSTEM_MAX) return;
+
+    state[system] = BOOT_OFF;
+    Serial.printf("[BOOT] %s is switched off, so it was not started\n",
+                  boot_systems[system].label);
 }
 
 void boot_screen_finish(void)

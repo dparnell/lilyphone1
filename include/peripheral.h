@@ -57,6 +57,7 @@ bool gps_init(void);
 void gps_task_create(void);
 void gps_task_suspend(void);
 void gps_task_resume(void);
+bool gps_is_started(void);
 /* Cold starts the receiver and reconfigures it. Blocks for over a second,
  * and the first fix afterwards takes minutes rather than seconds. */
 bool gps_reset(void);

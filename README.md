@@ -171,6 +171,19 @@ screen, the GPS screen and the dialler, which are the three switches with an app
 behind them. Messages and Hotspot share the modem's switch and are struck
 through with the dialler.
 
+**A module you switch off stays off across a restart.** The GPS, LoRa, modem and
+sensor switches are remembered, and they are read before anything is given power
+— so a module you turned off is not started at boot at all, rather than started
+and then stopped once the settings screen appears. It saves the seconds of boot
+that module's setup would have taken, and the boot screen marks it with a single
+stroke to distinguish "you switched this off" from the cross a part that failed
+to answer gets.
+
+The mesh is the one that only half stops. Its node still comes up with the radio
+switched off, because the contacts, the message log and every setting behind the
+Mesh screen are worth reaching whether or not anything can be transmitted; what
+waits is the radio, and it starts the moment the switch moves.
+
 **The module power switches in Settings now take their readers with them.**
 Cutting power to the GPS, the LoRa radio or the modem stops whatever was talking
 to it, rather than leaving a task spending its timeouts on a module that is not

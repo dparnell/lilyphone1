@@ -29,8 +29,22 @@ volatile bool default_gps_status = true;
 volatile bool default_lora_status = true;
 volatile bool default_a7682_status = true;
 
+/* The 1.8V sensor rail, as asked for rather than as it stands. The two differ:
+ * LTR553_init() raises the rail to look for a sensor and puts it back down when
+ * none answers, so the rail can be off while the setting is on. The switch
+ * shows what was asked for - a switch that flips itself back is worse than one
+ * that reports honestly - and ear detect asks sensor_rail_is_on() instead,
+ * because that is a question about what can actually be read. */
+static bool default_sensor_status = true;
+
+static void power_save(void);
+
 // Notification preferences, persisted in NVS.
 #define NOTIFY_PREFS_NAMESPACE "notify"
+/* Which modules are switched on, kept apart from the notification preferences
+ * because these are read at the very top of setup() - before the display, the
+ * filesystem or anything else - to decide what gets power at all. */
+#define POWER_PREFS_NAMESPACE  "power"
 static bool notify_vibrate_call = true;
 static bool notify_vibrate_text = true;
 // Off by default: the only speaker on this board is the modem's, and whether
@@ -71,18 +85,37 @@ void ui_setting_set_gps_status(bool on)
     // enable GPS module power
     digitalWrite(BOARD_GPS_EN, on);
     default_gps_status = on;
+    power_save();
 
     /* There is nothing to read from an unpowered receiver, and a task polling a
-     * dead port only burns CPU and fills the log with "no fix". Coming back, it
-     * is the mesh that decides whether the receiver is wanted running. */
-    if(!on)                        gps_task_suspend();
-    else if(mesh_net_wants_gps())  gps_task_resume();
+     * dead port only burns CPU and fills the log with "no fix". */
+    if(!on) {
+        gps_task_suspend();
+        return;
+    }
+
+    /* A receiver that has just been given power knows nothing: it comes back at
+     * its defaults, having forgotten the baud rate and the message set it was
+     * configured with - and if it was switched off when the phone booted it was
+     * never configured at all. So this is a full gps_init() rather than a
+     * resume. It blocks for around a second, which is what a switch press can
+     * afford and a timer could not.
+     *
+     * The task is suspended across it because that task is the only other user
+     * of the serial port. Coming back, it is the mesh that decides whether the
+     * receiver is wanted running. */
+    gps_task_suspend();
+    delay(150);            // let the module's supply come up before talking to it
+    gps_init();
+
+    if(mesh_net_wants_gps()) gps_task_resume();
 }
 void ui_setting_set_lora_status(bool on)
 {
     // enable LORA module power
     digitalWrite(BOARD_LORA_EN, on);
     default_lora_status = on;
+    power_save();
 
     /* A companion app connected to a node whose radio has just been switched
      * off is connected to something that can no longer send or hear anything.
@@ -95,17 +128,34 @@ void ui_setting_set_lora_status(bool on)
 }
 void ui_setting_set_sensor_status(bool on)
 {
-    /* The 1.8V sensor rail. No local copy of the state: the driver that owns
-     * the rail decides whether it comes up at boot at all, so a mirror here
-     * would start out disagreeing with it. */
+    default_sensor_status = on;
+    power_save();
+
+    // peri_ltr553.cpp owns the rail; it is the only part left on it.
     sensor_rail_set(on);
 }
 void ui_setting_set_a7682_status(bool on)
 {
     // enable 7682 module power
     digitalWrite(BOARD_6609_EN, on);
-    digitalWrite(BOARD_A7682E_PWRKEY, on);
     default_a7682_status = on;
+    power_save();
+
+    /* PWRKEY is a button, not a switch. The module starts on a pulse and stops
+     * on a longer one, and the line left high is the button held down - so this
+     * is the same sequence the boot path uses rather than a level. Without it a
+     * modem that was switched off when the phone booted has power but was never
+     * told to start, and answers nothing for the rest of the run. */
+    if(on) {
+        delay(10);
+        digitalWrite(BOARD_A7682E_PWRKEY, LOW);
+        delay(10);
+        digitalWrite(BOARD_A7682E_PWRKEY, HIGH);
+        delay(50);
+        digitalWrite(BOARD_A7682E_PWRKEY, LOW);
+    } else {
+        digitalWrite(BOARD_A7682E_PWRKEY, LOW);
+    }
 
     // The task that owns the serial port stops using it, and sets the modem up
     // again from scratch when it comes back.
@@ -135,7 +185,7 @@ bool ui_setting_get_lora_status(void)
 }
 bool ui_setting_get_sensor_status(void)
 {
-    return sensor_rail_is_on();
+    return default_sensor_status;
 }
 bool ui_setting_get_a7682_status(void)
 {
@@ -469,6 +519,50 @@ void ui_setting_autolock_next(void)
         autolock_choice = 0;
     }
     notify_save();
+}
+
+static void power_save(void)
+{
+    Preferences prefs;
+    if(!prefs.begin(POWER_PREFS_NAMESPACE, false)) return;
+
+    prefs.putBool("gps",     default_gps_status);
+    prefs.putBool("lora",    default_lora_status);
+    prefs.putBool("modem",   default_a7682_status);
+    prefs.putBool("sensors", default_sensor_status);
+    prefs.end();
+}
+
+/* What was switched off last time.
+ *
+ * Called from the top of setup(), before any module is given power, because a
+ * module that is meant to be off should never come up at all - not come up and
+ * then be switched back down once the UI exists. Nothing here touches hardware:
+ * main.cpp reads these back and decides what to power and what to skip.
+ *
+ * Everything defaults to on, so a phone with nothing stored behaves as it
+ * always did. There is no crash latch on these the way there is on the
+ * companion link, because the failure they can cause is the safe one: the worst
+ * a remembered value does here is leave a module off, which is recoverable from
+ * the settings screen. A remembered value that turns something *on* is the kind
+ * that needs a latch.
+ */
+void ui_power_load(void)
+{
+    Preferences prefs;
+    if(!prefs.begin(POWER_PREFS_NAMESPACE, true)) return;
+
+    default_gps_status    = prefs.getBool("gps",     default_gps_status);
+    default_lora_status   = prefs.getBool("lora",    default_lora_status);
+    default_a7682_status  = prefs.getBool("modem",   default_a7682_status);
+    default_sensor_status = prefs.getBool("sensors", default_sensor_status);
+    prefs.end();
+
+    Serial.printf("[POWER] remembered: gps %s, lora %s, modem %s, sensors %s\n",
+                  default_gps_status    ? "on" : "OFF",
+                  default_lora_status   ? "on" : "OFF",
+                  default_a7682_status  ? "on" : "OFF",
+                  default_sensor_status ? "on" : "OFF");
 }
 
 void ui_settings_load(void)

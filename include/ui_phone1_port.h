@@ -65,6 +65,11 @@ void ui_setting_autolock_next(void);
 /* Restores them from NVS. Call before the settings screen is built. */
 void ui_settings_load(void);
 
+/* Which modules were switched off when the phone was last shut down. Read at
+ * the top of setup(), before anything is given power - a module that is meant
+ * to be off is never started, rather than started and then stopped. */
+void ui_power_load(void);
+
 /* The modem module's blinking network status LED. Driven by the modem's own
  * firmware, so this asks over AT rather than switching a pin. */
 void ui_setting_set_netlight(bool on);

@@ -51,6 +51,12 @@ void boot_screen_busy(int system);
  * line: `peri_init_st[x] = boot_screen_done(BOOT_x, thing_init());` */
 bool boot_screen_done(int system, bool ok);
 
+/* This one was not started because its module is switched off. Marked with a
+ * single stroke rather than the cross a failure gets - the same distinction the
+ * home screen makes, since "you turned this off" and "this did not answer" want
+ * telling apart at a glance. */
+void boot_screen_off(int system);
+
 /* The last paint before the UI takes the panel over. */
 void boot_screen_finish(void);
 

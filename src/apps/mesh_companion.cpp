@@ -1663,6 +1663,18 @@ bool mesh_companion_link_saved(void)
     return chat_mesh != NULL && link_effective() != MESH_LINK_OFF;
 }
 
+void mesh_companion_boot_blocked(void)
+{
+    /* The same state mesh_companion_set_node_powered(false) reaches, minus the
+     * link_request(). At boot there is no link to take down, and spawning the
+     * 12KB task to discover that would be racing companion_load() for the
+     * setting it is about to read. */
+    link_blocked = true;
+    link_set_detail("the LoRa radio is switched off");
+
+    Serial.println("[LINK] the radio is switched off, so no link starts");
+}
+
 void mesh_companion_set_node_powered(bool powered)
 {
     if(link_blocked == !powered) return;

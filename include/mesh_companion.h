@@ -61,6 +61,11 @@ void mesh_companion_hold_off(void);
  * the power is, without the setting having changed in between. */
 void mesh_companion_set_node_powered(bool powered);
 
+/* The same thing at boot, before there is any link to take down - and before
+ * mesh_companion_link_saved() is asked, since a link that cannot start should
+ * not be costing the display its fast drawing buffer. */
+void mesh_companion_boot_blocked(void);
+
 /* Starts the remembered link. Called once during startup, after the display has
  * taken the memory it needs, so that what is left is what the radio gets. */
 void mesh_companion_boot(void);

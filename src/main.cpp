@@ -478,15 +478,25 @@ void setup() {
   pinMode(BOARD_A7682E_PWRKEY, OUTPUT); 
   digitalWrite(BOARD_KEYBOARD_LED, LOW);
   digitalWrite(BOARD_MOTOR_PIN, LOW);
-  digitalWrite(BOARD_6609_EN, HIGH);
-  digitalWrite(BOARD_LORA_EN, HIGH);
-  digitalWrite(BOARD_GPS_EN, HIGH);
+
+  /* Which modules were switched off last time. Read here, before any of them is
+   * given power, so that one the user turned off is never started rather than
+   * started and then stopped once the settings screen exists. Nothing below
+   * this line powers a module the settings say is off. */
+  ui_power_load();
+
+  digitalWrite(BOARD_6609_EN, ui_setting_get_a7682_status());
+  digitalWrite(BOARD_LORA_EN, ui_setting_get_lora_status());
+  digitalWrite(BOARD_GPS_EN,  ui_setting_get_gps_status());
+
   /* Down, not up. The only parts on this rail are the LTR-553ALS and a BHI260AP
    * motion hub that nothing reads; LTR553_init() raises it to ask whether a
    * light sensor is there and puts it back if none answers, so a board with
    * neither fitted never powers it at all. */
   digitalWrite(BOARD_1V8_EN, LOW);
-  digitalWrite(BOARD_A7682E_PWRKEY, HIGH);
+
+  // PWRKEY is a button rather than a switch; A7682E_init() gives it its pulse.
+  digitalWrite(BOARD_A7682E_PWRKEY, ui_setting_get_a7682_status() ? HIGH : LOW);
 
   // LORA、SD、EPD use the same SPI, in order to avoid mutual influence;
   // before powering on, all CS signals should be pulled high and in an unselected state;
@@ -579,23 +589,63 @@ void setup() {
   boot_screen_busy(BOOT_SDCARD);
   peri_init_st[E_PERI_SD]         = boot_screen_done(BOOT_SDCARD, sd_care_init());
 
-  boot_screen_busy(BOOT_GPS);
-  peri_init_st[E_PERI_GPS]        = boot_screen_done(BOOT_GPS, gps_init());
+  /* Each of these is skipped rather than attempted when its module is switched
+   * off. Attempting it would mean waiting out every timeout in the driver to
+   * discover what the settings already say, and then reporting a failure the
+   * user asked for. Turning the switch back on runs the same setup then. */
+  if(ui_setting_get_gps_status()) {
+      boot_screen_busy(BOOT_GPS);
+      peri_init_st[E_PERI_GPS]    = boot_screen_done(BOOT_GPS, gps_init());
+  } else {
+      peri_init_st[E_PERI_GPS]    = false;
+      boot_screen_off(BOOT_GPS);
+  }
 
-  boot_screen_busy(BOOT_LIGHT);
-  peri_init_st[E_PERI_LTR_553ALS] = boot_screen_done(BOOT_LIGHT, LTR553_init());
+  if(ui_setting_get_sensor_status()) {
+      boot_screen_busy(BOOT_LIGHT);
+      peri_init_st[E_PERI_LTR_553ALS] = boot_screen_done(BOOT_LIGHT, LTR553_init());
+  } else {
+      peri_init_st[E_PERI_LTR_553ALS] = false;
+      boot_screen_off(BOOT_LIGHT);
+  }
   // Restore the chosen time zone before anything renders a clock.
   system_clock_init();
 
-  boot_screen_busy(BOOT_MODEM);
-  peri_init_st[E_PERI_A7682E]     = boot_screen_done(BOOT_MODEM, A7682E_init());
+  if(ui_setting_get_a7682_status()) {
+      boot_screen_busy(BOOT_MODEM);
+      peri_init_st[E_PERI_A7682E] = boot_screen_done(BOOT_MODEM, A7682E_init());
+  } else {
+      /* The service task still starts, because it is what brings the modem up
+       * when the switch moves: it retries AT until the module answers, and does
+       * the whole configuring when it does. What is skipped is the several
+       * seconds of waiting for a module that has deliberately not been given
+       * power. */
+      SerialAT.begin(115200, SERIAL_8N1, BOARD_A7682E_TXD, BOARD_A7682E_RXD);
+      modem_service_init(false);
+      modem_set_powered(false);
+
+      peri_init_st[E_PERI_A7682E] = false;
+      boot_screen_off(BOOT_MODEM);
+  }
 
   phone_store_init();
   udp_relay_init();
 
+  /* The mesh node comes up either way - the contacts, the message log and every
+   * setting behind the Mesh screen are worth having whether or not the radio is
+   * powered - so what the switch decides is only whether the radio half of it
+   * starts. Told before mesh_net_init(), so the radio is never touched. */
+  if(!ui_setting_get_lora_status()) {
+      mesh_net_set_powered(false);
+      mesh_companion_boot_blocked();
+  }
+
   // After the SPI bus is up, and after the display: the mesh shares the bus.
   boot_screen_busy(BOOT_MESH);
-  peri_init_st[E_PERI_LORA] = boot_screen_done(BOOT_MESH, mesh_net_init());
+  peri_init_st[E_PERI_LORA] = mesh_net_init();
+
+  if(ui_setting_get_lora_status()) boot_screen_done(BOOT_MESH, peri_init_st[E_PERI_LORA]);
+  else                             boot_screen_off(BOOT_MESH);
 
   boot_screen_finish();
 

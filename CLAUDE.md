@@ -231,9 +231,44 @@ Numbers are compared by `phone_number_match()` (last 7 digits, digits only), so 
 
 The settings screen can cut power to the GPS, the LoRa radio, the modem and the 1.8V sensor rail. Each of those has something reading it, and a task talking to an unpowered module is a task spending its timeouts failing - so each power switch takes its reader down with it and brings it back afterwards.
 
+**The switches are remembered, and honoured before anything is powered.** They
+persist in NVS under the `power` namespace, and `ui_power_load()` is called from
+the top of `setup()` - before the enable pins are written - so a module that was
+switched off is never given power at all. What follows skips its init rather than
+attempting it: waiting out `GPS_Recovery()`'s timeouts or the modem's five `AT`
+retries only to report a failure the user asked for costs seconds of boot and
+tells nobody anything. `boot_screen_off()` marks those cells with a single stroke
+rather than the cross a failure gets, which is the distinction the home screen
+already makes.
+
+Two of the four need more than a skip:
+
+- **The mesh node starts whether or not its radio does.** The contacts, the
+  message log, the radio settings and the companion link's own settings are all
+  worth reaching while the radio is down, so `mesh_net_init()` skips only
+  `radio.std_init()`, `radio_driver.begin()` and `setParams()` when
+  `radio_powered` is false - `Dispatcher::begin()` touches no hardware - and the
+  mesh task idles until `radio_repower` sends it through `radio_bring_up()`.
+  `main.cpp` therefore calls `mesh_net_set_powered(false)` *before*
+  `mesh_net_init()`.
+- **The companion link is blocked through `mesh_companion_boot_blocked()`, not
+  `mesh_companion_set_node_powered(false)`.** The latter calls `link_request()`,
+  which spawns a 12KB task to take down a link that does not exist yet and would
+  be racing `companion_load()` for the setting it is about to read. It has to
+  happen before `lvgl_init()` regardless, since `mesh_companion_link_saved()` is
+  what decides where the drawing buffer goes.
+
+These settings deliberately have no crash latch, unlike the companion link. The
+failure they can cause is the safe one: a remembered value here leaves a module
+*off*, which the settings screen can always undo. A remembered value that turns
+something on is the kind that can fail the boot before there is a screen to fix
+it with.
+
 The part that is easy to get wrong is the coming back. **A module that has been switched off keeps nothing**: the modem forgets its character set and message format, the SX1262 forgets its frequency and spreading factor. So neither is simply resumed - `modem_task()` drops `configured`, which sends it back through the setup path it already had for a modem that was still booting, and `mesh_task()` runs `radio_bring_up()` and re-announces the node. Both flags are `volatile` and read once per pass rather than locked; a stale read costs one more iteration and nothing else.
 
-The GPS is the exception in one direction: turning its power back on hands the decision to `mesh_net_wants_gps()`, because the receiver runs only while something wants it, and that is decided in one place already.
+The GPS needs the same treatment and did not used to get it: switching it back on only resumed the task, against a receiver that had lost its baud rate and message set along with its power - and, if it was off when the phone booted, had never been configured at all. `ui_setting_set_gps_status(true)` now suspends the task, waits for the supply, and runs `gps_init()` again, which is safe to call twice because `gps_task_create()` is guarded on `gps_handle`. Whether the receiver then *runs* is still `mesh_net_wants_gps()`'s decision, since that is settled in one place already.
+
+**`BOARD_A7682E_PWRKEY` is a button, not a switch.** The modem starts on a pulse - low, high for 50ms, low - which is what `A7682E_init()` does at boot. `ui_setting_set_a7682_status()` used to drive the line to a level and leave it there, which is the button held down; a modem that was switched off at boot then had power but had never been told to start. It now gives the same pulse.
 
 ### Storage browser and export
 

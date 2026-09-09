@@ -1094,11 +1094,18 @@ bool mesh_net_init(void)
     }
     memset(msg_log, 0, sizeof(mesh_msg_t) * MESH_MSG_MAX);
 
-    // The bus is already up from main; the radio just needs its own settings.
-    int state = radio.std_init(&radio_spi);
-    if(!state) {
+    /* The bus is already up from main; the radio just needs its own settings -
+     * unless it is switched off, in which case the node still comes up without
+     * it. That is deliberate: the contacts, the message log, the radio settings
+     * and the companion link's own settings are all worth being able to look at
+     * and change while the radio is down, and the mesh task idles harmlessly
+     * until radio_powered goes true and radio_bring_up() runs. */
+    if(radio_powered && !radio.std_init(&radio_spi)) {
         Serial.println("[MESH] the radio would not start");
         return false;
+    }
+    if(!radio_powered) {
+        Serial.println("[MESH] the radio is switched off; starting the node without it");
     }
 
     packet_mgr = new StaticPoolPacketManager(16);
@@ -1116,7 +1123,7 @@ bool mesh_net_init(void)
     time_t now = time(NULL);
     if(now > 1700000000) rtc_clock.setCurrentTime((uint32_t)now);
 
-    radio_driver.begin();
+    if(radio_powered) radio_driver.begin();
     the_mesh->begin();
 
     public_channel = the_mesh->addChannel(MESH_PUBLIC_NAME, MESH_PUBLIC_PSK);
@@ -1134,8 +1141,10 @@ bool mesh_net_init(void)
 
     mesh_radio_t r;
     mesh_net_get_radio(&r);
-    radio_driver.setParams(r.freq_mhz, r.bandwidth_khz, r.spreading_factor, r.coding_rate);
-    radio.setOutputPower(tx_power_dbm);
+    if(radio_powered) {
+        radio_driver.setParams(r.freq_mhz, r.bandwidth_khz, r.spreading_factor, r.coding_rate);
+        radio.setOutputPower(tx_power_dbm);
+    }
 
     /* The companion protocol drives the same node the screen does, so it is
      * attached once the mesh exists and serviced from the same task. */
