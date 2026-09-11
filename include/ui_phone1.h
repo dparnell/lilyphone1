@@ -56,6 +56,8 @@ enum {
     SCREEN16_1_ID, // one hotspot setting at a time
     SCREEN17_ID,   // storage: what is on the two filesystems
     SCREEN17_1_ID, // the start of one file
+    SCREEN18_ID,   // calculator
+    SCREEN18_1_ID, // the RPN program, listed
 };
 
 /* Why the contacts list was opened. When it is a pick the list hands a number

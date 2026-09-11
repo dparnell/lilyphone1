@@ -10,6 +10,7 @@
 #include "mesh_net.h"
 #include "mesh_companion.h"
 #include "store_export.h"
+#include "calc.h"
 #include <SD.h>
 #include <SPIFFS.h>
 #include "Arduino.h"
@@ -429,8 +430,10 @@ static struct menu_btn menu_btn_list[] =
     {SCREEN3_ID,  &img_GPS,     NULL,                "GPS",      95,     101, UI_POWER_GPS},
     {SCREEN1_ID,  &img_lora,    NULL,                "Mesh",     167,    101, UI_POWER_LORA},
     {SCREEN16_ID, NULL,         LV_SYMBOL_WIFI,      "Hotspot",  23,     189, UI_POWER_MODEM},
-    {SCREEN11_ID, &img_PCM5102, NULL,                "Sleep",    95,     189},
-    {SCREEN9_ID,  NULL,         LV_SYMBOL_POWER,     "Shutdown", 167,    189},
+    {SCREEN18_ID, NULL,         LV_SYMBOL_KEYBOARD,  "Calc",     95,     189},
+    {SCREEN11_ID, &img_PCM5102, NULL,                "Sleep",    167,    189},
+
+    {SCREEN9_ID,  NULL,         LV_SYMBOL_POWER,     "Shutdown", 23,     13},  // Page two
 };
 
 static void menu_btn_event_cb(lv_event_t *e)
@@ -5519,6 +5522,380 @@ static scr_lifecycle_t screen16_1 = {
     .destroy = destroy16_1,
 };
 #endif
+//************************************[ screen 18 ]***************************************** calculator
+#if 1
+/* The keypad is one lv_btnmatrix per mode, which is what keeps forty keys
+ * within the 48KB LVGL has: a matrix is a single object however many buttons
+ * it draws. The key text is the message - it goes to calc_key() as is - so the
+ * maps below are both the layout and the vocabulary. LV_SYMBOL_BACKSPACE is the
+ * one exception, translated to "BS" on the way in because the engine speaks
+ * ASCII only. */
+static lv_obj_t *scr18_status = NULL, *scr18_info = NULL, *scr18_top = NULL, *scr18_main = NULL;
+static lv_obj_t *scr18_pad = NULL, *scr18_mode_lab = NULL;
+static int       scr18_map_shown = -1;
+
+#define CALC_TOP_CHARS   25   // font 15 across 226px
+#define CALC_MAIN_CHARS  18   // font 20 across 226px
+
+static const char *scr18_basic_map[] = {
+    "CLR", LV_SYMBOL_BACKSPACE, "%", "/", "\n",
+    "7", "8", "9", "*", "\n",
+    "4", "5", "6", "-", "\n",
+    "1", "2", "3", "+", "\n",
+    "+/-", "0", ".", "=", "" };
+
+static const char *scr18_sci_map[] = {
+    "sin", "cos", "tan", "INV", "CLR", "\n",
+    "ln", "log", "sqrt", "1/x", LV_SYMBOL_BACKSPACE, "\n",
+    "pi", "y^x", "mod", "%", "DEG", "\n",
+    "7", "8", "9", "(", ")", "\n",
+    "4", "5", "6", "*", "/", "\n",
+    "1", "2", "3", "+", "-", "\n",
+    "0", ".", "+/-", "=", "" };
+
+static const char *scr18_sci_inv_map[] = {
+    "asin", "acos", "atan", "INV", "CLR", "\n",
+    "e^x", "10^x", "x^2", "n!", LV_SYMBOL_BACKSPACE, "\n",
+    "e", "y^x", "mod", "%", "DEG", "\n",
+    "7", "8", "9", "(", ")", "\n",
+    "4", "5", "6", "*", "/", "\n",
+    "1", "2", "3", "+", "-", "\n",
+    "0", ".", "+/-", "=", "" };
+
+static const char *scr18_prog_map[] = {
+    "HEX", "DEC", "OCT", "BIN", "WID", "\n",
+    "and", "or", "xor", "not", "mod", "\n",
+    "<<", ">>", "(", ")", "CLR", "\n",
+    "A", "B", "C", "D", LV_SYMBOL_BACKSPACE, "\n",
+    "E", "F", "+/-", "*", "/", "\n",
+    "7", "8", "9", "+", "-", "\n",
+    "4", "5", "6", "=", "\n",
+    "1", "2", "3", "0", "" };
+
+static const char *scr18_rpn_map[] = {
+    "PRGM", "R/S", "SST", "BST", "CLP", "LIST", "\n",
+    "LBL", "GTO", "x=0?", "x=y?", "DEG", "INV", "\n",
+    "STO", "RCL", "LSTx", "x<>y", "Rv", "CLx", "\n",
+    "sin", "cos", "tan", "ln", "log", "pi", "\n",
+    "sqrt", "1/x", "y^x", "mod", "EEX", "CLR", "\n",
+    "7", "8", "9", "+/-", LV_SYMBOL_BACKSPACE, "/", "\n",
+    "4", "5", "6", "ENT", "-", "*", "\n",
+    "1", "2", "3", "0", ".", "+", "" };
+
+static const char *scr18_rpn_inv_map[] = {
+    "PRGM", "R/S", "SST", "BST", "CLP", "LIST", "\n",
+    "LBL", "GTO", "x<0?", "x<y?", "DEG", "INV", "\n",
+    "STO", "RCL", "LSTx", "x<>y", "Rv", "CLx", "\n",
+    "asin", "acos", "atan", "e^x", "10^x", "e", "\n",
+    "x^2", "n!", "y^x", "mod", "EEX", "CLR", "\n",
+    "7", "8", "9", "+/-", LV_SYMBOL_BACKSPACE, "/", "\n",
+    "4", "5", "6", "ENT", "-", "*", "\n",
+    "1", "2", "3", "0", ".", "+", "" };
+
+static const char *scr18_tail(const char *s, int max)
+{
+    int l = strlen(s);
+    return l > max ? s + (l - max) : s;
+}
+
+/* Which map the pad shows, and the two double-width keys that make the ragged
+ * rows square. Set after every map change: lv_btnmatrix_set_map throws the
+ * control bits away. */
+static void scr18_apply_map(void)
+{
+    int mode = calc_mode();
+    int want = mode * 2 + (calc_inv() ? 1 : 0);
+    if(want == scr18_map_shown) return;
+    scr18_map_shown = want;
+
+    const char **map;
+    int wide_a = -1, wide_b = -1;
+    switch(mode) {
+        case CALC_MODE_SCI:
+            map = calc_inv() ? scr18_sci_inv_map : scr18_sci_map;
+            wide_a = 33;                       // "="
+            break;
+        case CALC_MODE_PROG:
+            map = scr18_prog_map;
+            wide_a = 33; wide_b = 37;          // "=" and "0"
+            break;
+        case CALC_MODE_RPN:
+            map = calc_inv() ? scr18_rpn_inv_map : scr18_rpn_map;
+            break;
+        default:
+            map = scr18_basic_map;
+            break;
+    }
+
+    lv_btnmatrix_set_map(scr18_pad, map);
+    if(wide_a >= 0) lv_btnmatrix_set_btn_width(scr18_pad, wide_a, 2);
+    if(wide_b >= 0) lv_btnmatrix_set_btn_width(scr18_pad, wide_b, 2);
+}
+
+/* In the programmer mode, digits the base has no use for are greyed. The
+ * engine would ignore them anyway; this says so before the press. */
+static void scr18_prog_digits(void)
+{
+    int base = calc_base();
+
+    int id = 0;
+    for(int i = 0; scr18_prog_map[i][0] != '\0'; i++) {
+        const char *t = scr18_prog_map[i];
+        if(t[0] == '\n') continue;
+        if(t[1] == '\0') {
+            int d = (t[0] >= '0' && t[0] <= '9') ? t[0] - '0' :
+                    (t[0] >= 'A' && t[0] <= 'F') ? t[0] - 'A' + 10 : -1;
+            if(d >= 0) {
+                if(d >= base) lv_btnmatrix_set_btn_ctrl(scr18_pad, id, LV_BTNMATRIX_CTRL_DISABLED);
+                else          lv_btnmatrix_clear_btn_ctrl(scr18_pad, id, LV_BTNMATRIX_CTRL_DISABLED);
+            }
+        }
+        id++;
+    }
+}
+
+static void scr18_render(void)
+{
+    scr18_apply_map();
+    if(calc_mode() == CALC_MODE_PROG) scr18_prog_digits();
+
+    lv_label_set_text(scr18_mode_lab, calc_mode_short(calc_mode()));
+    lv_label_set_text(scr18_status, calc_line_status());
+    lv_label_set_text(scr18_info, calc_line_info());
+    lv_label_set_text(scr18_top, scr18_tail(calc_line_top(), CALC_TOP_CHARS));
+
+    /* The result gets the big font while it fits, and drops to two lines of
+     * the small one when it does not - a 32-bit number in binary, say. */
+    const char *main = calc_line_main();
+    if(strlen(main) <= CALC_MAIN_CHARS) {
+        lv_obj_set_style_text_font(scr18_main, FONT_BOLD_SIZE_20, LV_PART_MAIN);
+        lv_label_set_long_mode(scr18_main, LV_LABEL_LONG_CLIP);
+    } else {
+        lv_obj_set_style_text_font(scr18_main, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_label_set_long_mode(scr18_main, LV_LABEL_LONG_DOT);
+    }
+    lv_label_set_text(scr18_main, main);
+}
+
+static void scr18_key(const char *k)
+{
+    if(!strcmp(k, LV_SYMBOL_BACKSPACE)) k = "BS";
+
+    if(!strcmp(k, "LIST")) {
+        scr_mgr_push(SCREEN18_1_ID, false);
+        return;
+    }
+
+    calc_key(k);
+    scr18_render();
+}
+
+static void scr18_pad_event(lv_event_t *e)
+{
+    lv_obj_t *btnm = (lv_obj_t *)lv_event_get_target(e);
+    uint32_t  id   = lv_btnmatrix_get_selected_btn(btnm);
+    if(id == LV_BTNMATRIX_BTN_NONE) return;
+
+    const char *txt = lv_btnmatrix_get_btn_text(btnm, id);
+    if(txt) scr18_key(txt);
+}
+
+/* The physical keyboard. Digits and operators are on the sym layer, and the
+ * letters that mean something - hex digits, "e" for an exponent, "x" as a
+ * multiply - are taken on either layer. Enter arrives as a click, not a key,
+ * because that is how LVGL's keypad driver delivers it. */
+static void scr18_keyboard_event(lv_event_t *e)
+{
+    bool rpn = calc_mode() == CALC_MODE_RPN;
+
+    if(e->code == LV_EVENT_CLICKED) { scr18_key(rpn ? "ENT" : "="); return; }
+    if(e->code != LV_EVENT_KEY) return;
+
+    uint32_t key = lv_event_get_key(e);
+    char one[2] = { (char)key, '\0' };
+
+    switch(key) {
+        case LV_KEY_ENTER:     scr18_key(rpn ? "ENT" : "="); return;
+        case LV_KEY_BACKSPACE: scr18_key("BS");  return;
+        case LV_KEY_ESC:       scr18_key("CLR"); return;
+        case 'x': case 'X':    scr18_key("*");   return;
+        case '^':              scr18_key("y^x"); return;
+        case ' ':              if(rpn) scr18_key("ENT"); return;
+        case 'e': case 'E':
+            if(calc_mode() == CALC_MODE_PROG) { one[0] = 'E'; scr18_key(one); }
+            else                                scr18_key("EEX");
+            return;
+        default: break;
+    }
+
+    if((key >= '0' && key <= '9') || strchr("+-*/().%", (int)key)) { scr18_key(one); return; }
+
+    if(calc_mode() == CALC_MODE_PROG) {
+        if(key >= 'a' && key <= 'f') { one[0] = (char)(key - 'a' + 'A'); scr18_key(one); }
+        else if(key >= 'A' && key <= 'F') scr18_key(one);
+    }
+}
+
+static void scr18_mode_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    calc_set_mode((calc_mode() + 1) % CALC_MODE_MAX);
+    scr18_render();
+
+    // The tap put the focus on this button; the keyboard belongs to the display.
+    lv_group_focus_obj(scr18_main);
+    ui_disp_full_refr();
+}
+
+static void scr18_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static lv_obj_t *scr18_line_create(lv_obj_t *parent, lv_coord_t y, lv_coord_t h, const lv_font_t *font,
+                                   lv_text_align_t align)
+{
+    lv_obj_t *lab = lv_label_create(parent);
+    lv_obj_set_size(lab, lv_pct(94), h);
+    lv_obj_set_style_text_font(lab, font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lab, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(lab, align, LV_PART_MAIN);
+    lv_label_set_long_mode(lab, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(lab, "");
+    lv_obj_align(lab, LV_ALIGN_TOP_MID, 0, y);
+    return lab;
+}
+
+static void create18(lv_obj_t *parent)
+{
+    scr18_status = scr18_line_create(parent, 32, 16, FONT_BOLD_SIZE_14, LV_TEXT_ALIGN_LEFT);
+    scr18_info   = scr18_line_create(parent, 46, 16, FONT_BOLD_SIZE_14, LV_TEXT_ALIGN_RIGHT);
+    scr18_top    = scr18_line_create(parent, 60, 18, FONT_BOLD_SIZE_15, LV_TEXT_ALIGN_RIGHT);
+    scr18_main   = scr18_line_create(parent, 78, 36, FONT_BOLD_SIZE_20, LV_TEXT_ALIGN_RIGHT);
+
+    /* The main line is also where the keyboard lands. It is put in the input
+     * group so the keypad driver sends it keys, and its focus outline is turned
+     * off, since a calculator display with a box round it looks like a fault. */
+    lv_obj_set_style_outline_width(scr18_main, 0, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(scr18_main, 0, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
+    lv_group_add_obj(lv_group_get_default(), scr18_main);
+    lv_obj_add_event_cb(scr18_main, scr18_keyboard_event, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(scr18_main, scr18_keyboard_event, LV_EVENT_CLICKED, NULL);
+
+    scr18_pad = lv_btnmatrix_create(parent);
+    lv_obj_set_size(scr18_pad, LV_HOR_RES - 2, LV_VER_RES - 116);
+    lv_obj_align(scr18_pad, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_border_width(scr18_pad, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(scr18_pad, 1, LV_PART_MAIN);
+    lv_obj_set_style_pad_gap(scr18_pad, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(scr18_pad, 0, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(scr18_pad, FONT_BOLD_SIZE_14, LV_PART_ITEMS);
+    lv_obj_add_event_cb(scr18_pad, scr18_pad_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Tapping the pad must not take the keyboard away from the display: a
+     * matrix in the group would swallow the next keys as cursor movement. */
+    lv_obj_clear_flag(scr18_pad, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_group_remove_obj(scr18_pad);
+
+    scr18_map_shown = -1;
+
+    scr_back_btn_create(parent, "Calculator", scr18_back_event);
+    lv_obj_t *mode_btn = scr_action_btn_create(parent, "BAS", scr18_mode_event);
+    scr18_mode_lab = lv_obj_get_child(mode_btn, 0);
+    lv_obj_set_style_text_font(scr18_mode_lab, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+
+    scr18_render();
+}
+
+static void entry18(void)
+{
+    lv_group_focus_obj(scr18_main);
+    scr18_render();
+    ui_disp_full_refr();
+}
+
+static void exit18(void)
+{
+    ui_disp_full_refr();
+}
+
+static void destroy18(void)
+{
+    scr18_status = scr18_info = scr18_top = scr18_main = NULL;
+    scr18_pad = scr18_mode_lab = NULL;
+    scr18_map_shown = -1;
+}
+
+static scr_lifecycle_t screen18 = {
+    .create = create18,
+    .entry = entry18,
+    .exit  = exit18,
+    .destroy = destroy18,
+};
+
+// --------------------- screen 18.1 --------------------- the RPN program, listed
+static lv_obj_t *scr18_1_label = NULL;
+static char      scr18_1_text[200 * 16 + 96];
+
+static void scr18_1_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr18_1_populate(void)
+{
+    int n = calc_prog_len();
+    if(n == 0) {
+        snprintf(scr18_1_text, sizeof(scr18_1_text),
+                 "No program.\n\nPress PRGM, then the keys you want\n"
+                 "remembered, then PRGM again. R/S runs\n"
+                 "it; LBL and GTO make it loop; the\n"
+                 "x=0? family skips a step when false.");
+    } else {
+        int pos = snprintf(scr18_1_text, sizeof(scr18_1_text), "%d step%s%s\n\n",
+                           n, n == 1 ? "" : "s", calc_prog_recording() ? "  (recording)" : "");
+        for(int i = 0; i < n && pos < (int)sizeof(scr18_1_text) - 24; i++) {
+            pos += snprintf(scr18_1_text + pos, sizeof(scr18_1_text) - pos, "%s%03d  %s\n",
+                            i == calc_prog_pc() ? ">" : " ", i, calc_prog_step(i));
+        }
+    }
+    lv_label_set_text_static(scr18_1_label, scr18_1_text);
+}
+
+static void create18_1(lv_obj_t *parent)
+{
+    lv_obj_t *page = lv_obj_create(parent);
+    lv_obj_set_size(page, lv_pct(96), LV_VER_RES - 36);
+    lv_obj_align(page, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(page, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(page, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(page, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(page, 4, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_OFF);
+    scr_scroll_for_epaper(page);
+
+    scr18_1_label = lv_label_create(page);
+    lv_obj_set_width(scr18_1_label, lv_pct(100));
+    lv_obj_set_style_text_font(scr18_1_label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr18_1_label, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_long_mode(scr18_1_label, LV_LABEL_LONG_WRAP);
+    scr18_1_populate();
+
+    scr_back_btn_create(parent, "Program", scr18_1_back_event);
+}
+
+static void entry18_1(void)  { scr18_1_populate(); ui_disp_full_refr(); }
+static void exit18_1(void)   { ui_disp_full_refr(); }
+static void destroy18_1(void) { scr18_1_label = NULL; }
+
+static scr_lifecycle_t screen18_1 = {
+    .create = create18_1,
+    .entry = entry18_1,
+    .exit  = exit18_1,
+    .destroy = destroy18_1,
+};
+#endif
+
 //************************************[ UI ENTRY ]******************************************
 static lv_obj_t *menu_keypad;
 static lv_timer_t *menu_timer = NULL;
@@ -5951,7 +6328,9 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN16_ID,   &screen16);     // Hotspot
     scr_mgr_register(SCREEN16_1_ID, &screen16_1);
     scr_mgr_register(SCREEN17_ID,   &screen17);    // storage
-    scr_mgr_register(SCREEN17_1_ID, &screen17_1);  //  - one file   //  - one setting
+    scr_mgr_register(SCREEN17_1_ID, &screen17_1);  //  - one file
+    scr_mgr_register(SCREEN18_ID,   &screen18);    // calculator
+    scr_mgr_register(SCREEN18_1_ID, &screen18_1);  //  - the RPN program listed
     
 
     scr_mgr_switch(SCREEN0_ID, false); // set root screen

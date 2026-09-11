@@ -11,6 +11,7 @@
 #include "peripheral.h"
 #include "modem_service.h"
 #include "phone_store.h"
+#include "calc.h"
 #include "system_clock.h"
 #include "udp_relay.h"
 #include "mesh_net.h"
@@ -629,6 +630,7 @@ void setup() {
   }
 
   phone_store_init();
+  calc_init();
   udp_relay_init();
 
   /* The mesh node comes up either way - the contacts, the message log and every

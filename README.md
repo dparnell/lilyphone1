@@ -340,6 +340,33 @@ because the point is that a spreadsheet opens it — message bodies keep the
 sender's line breaks, safely inside the quotes. Mesh messages are not included;
 they only ever exist in memory.
 
+**Calculator.** Four calculators behind one *Calc* icon, cycled with the
+button at the top right; the one you were last using comes back next time.
+
+- *Basic* is the four operations and percent.
+- *Scientific* adds precedence and brackets - `2 + 3 * 4` is 14 - along with
+  trig in degrees or radians, logs, powers, roots and factorials. *INV* swaps
+  the keys to their inverses for one press.
+- *Programmer* works on whole numbers in hex, decimal, octal or binary, with
+  and/or/xor/not, shifts and modulo, at a word width of 8, 16, 32 or 64 bits
+  that *WID* cycles. The line above the result shows the same value in decimal
+  when you are in another base, or in hex when you are in decimal, and the
+  digit keys the current base cannot use are greyed.
+- *RPN* is a four-level stack - X, Y, Z and T are all on screen - with LASTx,
+  ten registers, and a program memory in the HP style. *PRGM* starts and stops
+  recording, and every key pressed in between is a step; *R/S* runs it, *SST*
+  runs one step, *LBL* and *GTO* make it loop, and *x=0?*, *x<0?*, *x=y?* and
+  *x<y?* skip the next step when they are false. *LIST* shows the program with
+  the step about to run marked, and it is kept on the flash, so it survives a
+  restart. Two hundred steps is the limit.
+
+The physical keyboard works as well as the on-screen keys: digits and
+operators from the symbol layer, Enter for `=` or *ENTER*, Backspace, Esc for
+clear, `x` as multiply, `e` for an exponent (or the hex digit, in programmer
+mode) and space for *ENTER* in RPN. The value in hand is carried across when
+you change mode, so a hex number can be read back in decimal by switching to
+Basic and a result from Scientific can be pushed onto the RPN stack.
+
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 

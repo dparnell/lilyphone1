@@ -270,6 +270,49 @@ The GPS needs the same treatment and did not used to get it: switching it back o
 
 **`BOARD_A7682E_PWRKEY` is a button, not a switch.** The modem starts on a pulse - low, high for 50ms, low - which is what `A7682E_init()` does at boot. `ui_setting_set_a7682_status()` used to drive the line to a level and leave it there, which is the button held down; a modem that was switched off at boot then had power but had never been told to start. It now gives the same pulse.
 
+### Calculator
+
+`src/apps/calc.cpp` is the engine and knows nothing about widgets; screen 18 in
+`ui_phone1.cpp` is the keypad and the four display lines. **The text on a key is
+the message** - the screen hands `calc_key()` the button's label verbatim, the
+physical keyboard is translated into the same strings, and an RPN program is
+nothing but those strings stored and replayed through the same call. So the
+button maps in the UI are the vocabulary as well as the layout, and `calc.h`
+lists every word. It is all ASCII because the mono fonts hold nothing else -
+which is why the keys read `sqrt`, `pi`, `x<>y` and `Rv` rather than the glyphs.
+`LV_SYMBOL_BACKSPACE` is the one exception and is turned into `"BS"` on the way
+in.
+
+Two evaluators. The algebraic one (basic, scientific, programmer) is a
+shunting-yard over a value stack and an operator stack, and the programmer mode
+is the same code on the `.i` half of a `{double, int64_t}` pair rather than the
+`.f` half - both are kept current, so a mode switch carries the number across.
+The RPN one is the four-register HP stack, with `lift` doing what "stack lift
+enabled" does on the real thing: `ENT` and `CLx` disable it, so the next number
+replaces X instead of pushing it. Keys that take a digit (`STO`, `RCL`, `GTO`,
+`LBL`) wait in `pending` and become one token - `STO3` - so that a program step
+is one step.
+
+Things the screen depends on:
+
+- **`lv_btnmatrix_set_map()` discards the control bits**, so the double-width
+  keys are set again after every map change (`scr18_apply_map`), and the greyed
+  digits are set again on every render.
+- **The keyboard lands on the main display label.** It is added to the input
+  group and its focus outline suppressed; the button matrix is *removed* from
+  the group and made not click-focusable, or a tap on the pad would take the
+  keyboard away and the next keys would move a cursor round the matrix instead.
+  Enter arrives as `LV_EVENT_CLICKED`, not as a key - that is how the keypad
+  driver delivers it - so both events are handled. Tapping the mode button does
+  move focus, and the handler puts it back.
+- **The result line drops to the small font at 19 characters** and to two lines
+  wrapped, which is enough for a 32-bit binary number but not a 64-bit one;
+  that ends in an ellipsis, and the line above still has it in hex.
+
+The program is saved to SPIFFS (`/calc.prg`, one step per line) when recording
+stops and when it is cleared or backstepped; mode, angle unit, base and width go
+to NVS under `calc`. Registers and the stack are not saved.
+
 ### Storage browser and export
 
 `src/apps/store_export.cpp` is the only thing in the firmware that writes to the SD card; everything else the phone keeps lives in SPIFFS. Both filesystems are `fs::FS`, which is what lets screen 17 walk either through one pointer - but they differ in one way that matters: **SPIFFS `File::name()` returns a full path where SD returns a bare name**, so the browser takes whatever follows the last slash and treats both alike.
