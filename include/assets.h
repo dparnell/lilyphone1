@@ -14,6 +14,8 @@ LV_IMG_DECLARE(img_about)
 LV_IMG_DECLARE(img_setting)
 LV_IMG_DECLARE(img_other)
 LV_IMG_DECLARE(img_GPS)
+LV_IMG_DECLARE(img_calendar)
+LV_IMG_DECLARE(img_calc)
 LV_IMG_DECLARE(img_A7682E)
 LV_IMG_DECLARE(img_touch)
 

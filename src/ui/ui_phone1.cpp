@@ -11,6 +11,7 @@
 #include "mesh_companion.h"
 #include "store_export.h"
 #include "calc.h"
+#include "calendar_store.h"
 #include <SD.h>
 #include <SPIFFS.h>
 #include "Arduino.h"
@@ -430,7 +431,8 @@ static struct menu_btn menu_btn_list[] =
     {SCREEN3_ID,  &img_GPS,     NULL,                "GPS",      95,     101, UI_POWER_GPS},
     {SCREEN1_ID,  &img_lora,    NULL,                "Mesh",     167,    101, UI_POWER_LORA},
     {SCREEN16_ID, NULL,         LV_SYMBOL_WIFI,      "Hotspot",  23,     189, UI_POWER_MODEM},
-    {SCREEN18_ID, NULL,         LV_SYMBOL_KEYBOARD,  "Calc",     95,     189},
+    {SCREEN18_ID, &img_calc,    NULL,                "Calc",     95,     189},
+    {SCREEN19_ID, &img_calendar, NULL,               "Calendar", 167,    189},
 };
 
 static void menu_btn_event_cb(lv_event_t *e)
@@ -5785,6 +5787,529 @@ static scr_lifecycle_t screen18_1 = {
 };
 #endif
 
+//************************************[ screen 19 ]***************************************** calendar
+#if 1
+/* A month at a time on a button matrix - 42 cells, one object - with the
+ * selected day's events listed underneath. Today is boxed, the selected day is
+ * inverted, and a day with something on it carries a small mark, all drawn in
+ * the matrix's draw events since a matrix has no per-button styles. */
+static lv_obj_t *scr19_month_lab = NULL, *scr19_grid = NULL, *scr19_list = NULL;
+static int       scr19_year = 0, scr19_month = 0;             // the month on show
+static int       scr19_sel_y = 0, scr19_sel_m = 0, scr19_sel_d = 0;
+static int       scr19_first_wd = 0, scr19_days = 0;
+static unsigned  scr19_seen_rev = 0;
+static uint32_t  ui_active_event = 0;                          // the editor's subject; 0 is new
+
+static char        scr19_day_txt[32][3];
+static const char *scr19_map[6 * 8];
+
+/* Today in local time - or, before the clock has been set, the day this
+ * firmware was built, which is at least a month somebody will recognise. */
+static void scr19_today(int *y, int *m, int *d)
+{
+    if(system_clock_is_set()) {
+        time_t now = time(NULL);
+        struct tm *lt = localtime(&now);
+        *y = lt->tm_year + 1900; *m = lt->tm_mon + 1; *d = lt->tm_mday;
+        return;
+    }
+    static const char *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char *built = __DATE__;                  // "Sep 11 2026"
+    *m = 1;
+    for(int i = 0; i < 12; i++) {
+        if(!strncmp(built, months + 3 * i, 3)) { *m = i + 1; break; }
+    }
+    *d = atoi(built + 4);
+    *y = atoi(built + 7);
+    if(*d < 1) *d = 1;
+}
+
+static bool scr19_cell_day(int cell, int *day)
+{
+    int d = cell - scr19_first_wd + 1;
+    if(d < 1 || d > scr19_days) return false;
+    *day = d;
+    return true;
+}
+
+static void scr19_build_grid(void)
+{
+    scr19_days     = calendar_days_in_month(scr19_year, scr19_month);
+    scr19_first_wd = calendar_weekday(scr19_year, scr19_month, 1);
+
+    int i = 0;
+    for(int cell = 0; cell < 42; cell++) {
+        int d;
+        scr19_map[i++] = scr19_cell_day(cell, &d) ? scr19_day_txt[d] : " ";
+        if(cell % 7 == 6) scr19_map[i++] = "\n";
+    }
+    scr19_map[i - 1] = "";
+
+    lv_btnmatrix_set_map(scr19_grid, scr19_map);
+    for(int cell = 0; cell < 42; cell++) {
+        int d;
+        if(!scr19_cell_day(cell, &d)) lv_btnmatrix_set_btn_ctrl(scr19_grid, cell, LV_BTNMATRIX_CTRL_HIDDEN);
+    }
+
+    lv_label_set_text_fmt(scr19_month_lab, "%s %d", calendar_month_name(scr19_month), scr19_year);
+}
+
+static void scr19_grid_draw(lv_event_t *e)
+{
+    lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
+    if(dsc->class_p != &lv_btnmatrix_class || dsc->type != LV_BTNMATRIX_DRAW_PART_BTN) return;
+
+    int day;
+    if(!scr19_cell_day(dsc->id, &day)) return;
+
+    int ty, tm, td;
+    scr19_today(&ty, &tm, &td);
+    bool sel   = scr19_year == scr19_sel_y && scr19_month == scr19_sel_m && day == scr19_sel_d;
+    bool today = scr19_year == ty && scr19_month == tm && day == td;
+
+    if(e->code == LV_EVENT_DRAW_PART_BEGIN) {
+        if(sel) {
+            dsc->rect_dsc->bg_color = DECKPRO_COLOR_FG;
+            dsc->rect_dsc->bg_opa   = LV_OPA_COVER;
+            dsc->label_dsc->color   = DECKPRO_COLOR_BG;
+        } else if(today) {
+            dsc->rect_dsc->border_color = DECKPRO_COLOR_FG;
+            dsc->rect_dsc->border_opa   = LV_OPA_COVER;
+            dsc->rect_dsc->border_width = 2;
+        }
+    } else if(e->code == LV_EVENT_DRAW_PART_END) {
+        if(!calendar_day_busy(scr19_year, scr19_month, day)) return;
+
+        // A mark under the number: something is on that day.
+        lv_draw_rect_dsc_t mark;
+        lv_draw_rect_dsc_init(&mark);
+        mark.bg_color = sel ? DECKPRO_COLOR_BG : DECKPRO_COLOR_FG;
+        mark.bg_opa   = LV_OPA_COVER;
+
+        lv_coord_t cx = (dsc->draw_area->x1 + dsc->draw_area->x2) / 2;
+        lv_area_t a;
+        a.x1 = cx - 2; a.x2 = cx + 2;
+        a.y2 = dsc->draw_area->y2 - 3; a.y1 = a.y2 - 1;
+        lv_draw_rect(dsc->draw_ctx, &mark, &a);
+    }
+}
+
+static void scr19_open_event(lv_event_t *e)
+{
+    ui_active_event = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    scr_mgr_push(SCREEN19_1_ID, false);
+}
+
+static void scr19_populate_list(void)
+{
+    lv_obj_clean(scr19_list);
+
+    uint32_t ids[16];
+    int n = calendar_day_events(scr19_sel_y, scr19_sel_m, scr19_sel_d, ids, 16);
+
+    if(n == 0) {
+        lv_obj_t *lab = lv_label_create(scr19_list);
+        lv_obj_set_style_text_font(lab, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lab, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_width(lab, lv_pct(100));
+        lv_obj_set_style_text_align(lab, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_label_set_text_fmt(lab, "Nothing on %s %d %s",
+                              calendar_weekday_name(calendar_weekday(scr19_sel_y, scr19_sel_m, scr19_sel_d)),
+                              scr19_sel_d, calendar_month_name(scr19_sel_m));
+        return;
+    }
+
+    for(int i = 0; i < n; i++) {
+        const cal_event_t *ev = calendar_find(ids[i]);
+        if(ev == NULL) continue;
+
+        char when[12];
+        if(ev->all_day) snprintf(when, sizeof(when), "all day");
+        else            snprintf(when, sizeof(when), "%02d:%02d", ev->hour, ev->minute);
+
+        lv_obj_t *row = lv_list_add_btn(scr19_list, ev->remind_min >= 0 ? LV_SYMBOL_BELL : NULL, ev->title);
+        lv_obj_set_height(row, 30);
+        lv_obj_set_style_text_font(row, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(row, DECKPRO_COLOR_BG, LV_PART_MAIN);
+        lv_obj_set_style_text_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_border_color(row, DECKPRO_COLOR_FG, LV_PART_MAIN);
+        lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(row, 6, LV_PART_MAIN);
+        lv_obj_set_style_pad_ver(row, 4, LV_PART_MAIN);
+
+        // The title takes what the time leaves, with a height so it cannot wrap.
+        lv_obj_t *title = lv_obj_get_child(row, lv_obj_get_child_cnt(row) - 1);
+        lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+        lv_obj_set_size(title, ev->remind_min >= 0 ? 130 : 150, 18);
+
+        lv_obj_t *at = lv_label_create(row);
+        lv_obj_set_style_text_font(at, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+        lv_label_set_text(at, when);
+
+        lv_obj_add_event_cb(row, scr19_open_event, LV_EVENT_CLICKED, (void *)(uintptr_t)ev->id);
+    }
+}
+
+static void scr19_show_month(int y, int m)
+{
+    scr19_year  = y;
+    scr19_month = m;
+    scr19_build_grid();
+    lv_obj_invalidate(scr19_grid);
+}
+
+static void scr19_grid_event(lv_event_t *e)
+{
+    lv_obj_t *grid = (lv_obj_t *)lv_event_get_target(e);
+    uint32_t  id   = lv_btnmatrix_get_selected_btn(grid);
+    if(id == LV_BTNMATRIX_BTN_NONE) return;
+
+    int day;
+    if(!scr19_cell_day((int)id, &day)) return;
+
+    scr19_sel_y = scr19_year; scr19_sel_m = scr19_month; scr19_sel_d = day;
+    lv_obj_invalidate(scr19_grid);
+    scr19_populate_list();
+    ui_disp_full_refr();
+}
+
+static void scr19_prev_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    int y = scr19_year, m = scr19_month - 1;
+    if(m < 1) { m = 12; y--; }
+    scr19_show_month(y, m);
+    ui_disp_full_refr();
+}
+
+static void scr19_next_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    int y = scr19_year, m = scr19_month + 1;
+    if(m > 12) { m = 1; y++; }
+    scr19_show_month(y, m);
+    ui_disp_full_refr();
+}
+
+/* Tapping the month name comes back to today from wherever you have paged to. */
+static void scr19_today_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr19_today(&scr19_sel_y, &scr19_sel_m, &scr19_sel_d);
+    scr19_show_month(scr19_sel_y, scr19_sel_m);
+    scr19_populate_list();
+    ui_disp_full_refr();
+}
+
+static void scr19_add_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    ui_active_event = 0;
+    scr_mgr_push(SCREEN19_1_ID, false);
+}
+
+static void scr19_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static lv_obj_t *scr19_nav_btn(lv_obj_t *parent, const char *symbol, lv_align_t align, lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_btn_create(parent);
+    lv_obj_remove_style_all(btn);
+    lv_obj_set_size(btn, 40, 26);
+    lv_obj_align(btn, align, align == LV_ALIGN_TOP_LEFT ? 2 : -2, 34);
+    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lab = lv_label_create(btn);
+    lv_obj_center(lab);
+    lv_obj_set_style_text_color(lab, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_label_set_text(lab, symbol);
+    return btn;
+}
+
+static void create19(lv_obj_t *parent)
+{
+    for(int d = 1; d <= 31; d++) snprintf(scr19_day_txt[d], sizeof(scr19_day_txt[d]), "%d", d);
+
+    if(scr19_sel_y == 0) scr19_today(&scr19_sel_y, &scr19_sel_m, &scr19_sel_d);
+    scr19_year  = scr19_sel_y;
+    scr19_month = scr19_sel_m;
+
+    scr19_nav_btn(parent, LV_SYMBOL_LEFT,  LV_ALIGN_TOP_LEFT,  scr19_prev_event);
+    scr19_nav_btn(parent, LV_SYMBOL_RIGHT, LV_ALIGN_TOP_RIGHT, scr19_next_event);
+
+    scr19_month_lab = lv_label_create(parent);
+    lv_obj_set_style_text_font(scr19_month_lab, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scr19_month_lab, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(scr19_month_lab, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_size(scr19_month_lab, LV_HOR_RES - 90, 20);
+    lv_obj_align(scr19_month_lab, LV_ALIGN_TOP_MID, 0, 38);
+    lv_obj_add_flag(scr19_month_lab, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(scr19_month_lab, scr19_today_event, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *head = lv_label_create(parent);
+    lv_obj_set_style_text_font(head, FONT_BOLD_SIZE_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(head, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_align(head, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_width(head, LV_HOR_RES);
+    lv_label_set_text(head, " Mo  Tu  We  Th  Fr  Sa  Su");
+    lv_obj_align(head, LV_ALIGN_TOP_MID, 0, 62);
+
+    scr19_grid = lv_btnmatrix_create(parent);
+    lv_obj_set_size(scr19_grid, LV_HOR_RES - 2, 6 * 25);
+    lv_obj_align(scr19_grid, LV_ALIGN_TOP_MID, 0, 78);
+    lv_obj_set_style_border_width(scr19_grid, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(scr19_grid, 1, LV_PART_MAIN);
+    lv_obj_set_style_pad_gap(scr19_grid, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(scr19_grid, 0, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(scr19_grid, FONT_BOLD_SIZE_14, LV_PART_ITEMS);
+    lv_obj_add_event_cb(scr19_grid, scr19_grid_event, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(scr19_grid, scr19_grid_draw, LV_EVENT_DRAW_PART_BEGIN, NULL);
+    lv_obj_add_event_cb(scr19_grid, scr19_grid_draw, LV_EVENT_DRAW_PART_END, NULL);
+    lv_obj_clear_flag(scr19_grid, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_group_remove_obj(scr19_grid);
+
+    scr19_list = lv_list_create(parent);
+    scr_scroll_for_epaper(scr19_list);
+    lv_obj_set_size(scr19_list, lv_pct(96), LV_VER_RES - 232);
+    lv_obj_align(scr19_list, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_pad_all(scr19_list, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(scr19_list, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(scr19_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scr19_list, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr19_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(scr19_list, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(scr19_list, LV_SCROLLBAR_MODE_OFF);
+
+    scr19_build_grid();
+    scr19_populate_list();
+    scr19_seen_rev = calendar_revision();
+
+    scr_back_btn_create(parent, "Calendar", scr19_back_event);
+    scr_action_btn_create(parent, LV_SYMBOL_PLUS, scr19_add_event);
+}
+
+static void entry19(void)
+{
+    // Back from the editor: whatever it did is reflected in the revision.
+    if(calendar_revision() != scr19_seen_rev) {
+        scr19_seen_rev = calendar_revision();
+        scr19_populate_list();
+        lv_obj_invalidate(scr19_grid);
+    }
+    ui_disp_full_refr();
+}
+
+static void exit19(void) { ui_disp_full_refr(); }
+
+static void destroy19(void)
+{
+    scr19_month_lab = scr19_grid = scr19_list = NULL;
+}
+
+static scr_lifecycle_t screen19 = {
+    .create = create19,
+    .entry = entry19,
+    .exit  = exit19,
+    .destroy = destroy19,
+};
+
+// --------------------- screen 19.1 --------------------- one event, edited
+static lv_obj_t *scr19_1_title_ta = NULL, *scr19_1_date_ta = NULL, *scr19_1_time_ta = NULL;
+static lv_obj_t *scr19_1_notes_ta = NULL;
+static lv_obj_t *scr19_1_allday_val = NULL, *scr19_1_repeat_val = NULL, *scr19_1_remind_val = NULL;
+static cal_event_t scr19_1_ev;
+
+static void scr19_1_back_event(lv_event_t *e)
+{
+    if(e->code == LV_EVENT_CLICKED) scr_mgr_pop(false);
+}
+
+static void scr19_1_allday_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr19_1_ev.all_day = !scr19_1_ev.all_day;
+    lv_label_set_text(scr19_1_allday_val, scr19_1_ev.all_day ? "ON" : "OFF");
+    ui_disp_full_refr();
+}
+
+static void scr19_1_repeat_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr19_1_ev.repeat = (scr19_1_ev.repeat + 1) % CAL_REPEAT_MAX;
+    lv_label_set_text(scr19_1_repeat_val, calendar_repeat_name(scr19_1_ev.repeat));
+    ui_disp_full_refr();
+}
+
+static void scr19_1_remind_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    scr19_1_ev.remind_min = calendar_remind_next(scr19_1_ev.remind_min);
+    lv_label_set_text(scr19_1_remind_val, calendar_remind_name(scr19_1_ev.remind_min));
+    ui_disp_full_refr();
+}
+
+static void scr19_1_save_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+
+    const char *title = lv_textarea_get_text(scr19_1_title_ta);
+    if(title == NULL || title[0] == '\0') {
+        ui_notice("Calendar", "Give the event a title.");
+        return;
+    }
+
+    int y, m, d;
+    if(sscanf(lv_textarea_get_text(scr19_1_date_ta), "%d-%d-%d", &y, &m, &d) != 3 ||
+       y < 2000 || y > 2199 || m < 1 || m > 12 || d < 1 || d > calendar_days_in_month(y, m)) {
+        ui_notice("Calendar", "The date should read YYYY-MM-DD.");
+        return;
+    }
+
+    int hh = 9, mm = 0;
+    if(!scr19_1_ev.all_day) {
+        if(sscanf(lv_textarea_get_text(scr19_1_time_ta), "%d:%d", &hh, &mm) != 2 ||
+           hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+            ui_notice("Calendar", "The time should read HH:MM, 24 hour.");
+            return;
+        }
+    }
+
+    snprintf(scr19_1_ev.title, sizeof(scr19_1_ev.title), "%s", title);
+    snprintf(scr19_1_ev.notes, sizeof(scr19_1_ev.notes), "%s", lv_textarea_get_text(scr19_1_notes_ta));
+    scr19_1_ev.year = y; scr19_1_ev.month = m; scr19_1_ev.day = d;
+    scr19_1_ev.hour = hh; scr19_1_ev.minute = mm;
+
+    bool ok = scr19_1_ev.id ? calendar_update(&scr19_1_ev) : calendar_add(&scr19_1_ev, NULL);
+    if(!ok) {
+        ui_notice("Calendar", "Could not save it. The calendar may be full.");
+        return;
+    }
+
+    // The month view lands on the day just saved.
+    scr19_sel_y = y; scr19_sel_m = m; scr19_sel_d = d;
+    scr_mgr_pop(false);
+}
+
+static void scr19_1_delete_do(void)
+{
+    calendar_remove(scr19_1_ev.id);
+    scr_mgr_pop(false);
+}
+
+static void scr19_1_delete_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    ui_confirm("Delete event", scr19_1_ev.title, "Delete", scr19_1_delete_do);
+}
+
+/* A row that cycles through its values on each press, like the settings rows. */
+static lv_obj_t *scr19_1_choice_create(lv_obj_t *parent, lv_coord_t y, const char *name,
+                                       const char *value, lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_btn_create(parent);
+    lv_obj_set_size(btn, lv_pct(92), 28);
+    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_set_style_bg_color(btn, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, 6, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_text_font(btn, FONT_BOLD_SIZE_15, LV_PART_MAIN);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lab = lv_label_create(btn);
+    lv_label_set_text(lab, name);
+    lv_obj_align(lab, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t *val = lv_label_create(btn);
+    lv_label_set_text(val, value);
+    lv_obj_align(val, LV_ALIGN_RIGHT_MID, 0, 0);
+    return val;
+}
+
+static void create19_1(lv_obj_t *parent)
+{
+    const cal_event_t *existing = ui_active_event ? calendar_find(ui_active_event) : NULL;
+    if(existing) {
+        scr19_1_ev = *existing;
+    } else {
+        memset(&scr19_1_ev, 0, sizeof(scr19_1_ev));
+        scr19_1_ev.year = scr19_sel_y; scr19_1_ev.month = scr19_sel_m; scr19_1_ev.day = scr19_sel_d;
+        scr19_1_ev.hour = 9; scr19_1_ev.minute = 0;
+        scr19_1_ev.repeat = CAL_REPEAT_NONE;
+        scr19_1_ev.remind_min = 15;
+    }
+
+    /* More fields than fit, so they sit in a page that scrolls above the
+     * Save/Delete bar. */
+    lv_obj_t *page = lv_obj_create(parent);
+    lv_obj_set_size(page, LV_HOR_RES, LV_VER_RES - 34 - 40);
+    lv_obj_align(page, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_set_style_bg_color(page, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(page, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(page, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(page, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_OFF);
+    scr_scroll_for_epaper(page);
+
+    char date[12], when[8];
+    snprintf(date, sizeof(date), "%04d-%02d-%02d", scr19_1_ev.year, scr19_1_ev.month, scr19_1_ev.day);
+    snprintf(when, sizeof(when), "%02d:%02d", scr19_1_ev.hour, scr19_1_ev.minute);
+
+    scr19_1_title_ta = scr_field_create(page, "Title", 2, scr19_1_ev.title, CAL_TITLE_LEN - 1);
+    scr19_1_date_ta  = scr_field_create(page, "Date  (YYYY-MM-DD)", 60, date, 10);
+    scr19_1_time_ta  = scr_field_create(page, "Time  (HH:MM)", 118, when, 5);
+
+    scr19_1_allday_val = scr19_1_choice_create(page, 178, "All day", scr19_1_ev.all_day ? "ON" : "OFF",
+                                               scr19_1_allday_event);
+    scr19_1_repeat_val = scr19_1_choice_create(page, 210, "Repeat", calendar_repeat_name(scr19_1_ev.repeat),
+                                               scr19_1_repeat_event);
+    scr19_1_remind_val = scr19_1_choice_create(page, 242, "Reminder", calendar_remind_name(scr19_1_ev.remind_min),
+                                               scr19_1_remind_event);
+
+    scr19_1_notes_ta = scr_field_create(page, "Notes", 276, scr19_1_ev.notes, CAL_NOTES_LEN - 1);
+
+    // Room to scroll the last field clear of the bar.
+    lv_obj_t *spacer = lv_obj_create(page);
+    lv_obj_remove_style_all(spacer);
+    lv_obj_set_size(spacer, 10, 10);
+    lv_obj_align(spacer, LV_ALIGN_TOP_MID, 0, 340);
+
+    lv_obj_t *bar = scr_action_bar_create(parent, 38);
+    scr_bar_btn_create(bar, LV_SYMBOL_OK "  Save", 106, scr19_1_save_event, NULL);
+    if(existing) scr_bar_btn_create(bar, LV_SYMBOL_TRASH "  Delete", 106, scr19_1_delete_event, NULL);
+    else         scr_bar_btn_create(bar, LV_SYMBOL_CLOSE "  Cancel", 106, scr19_1_back_event, NULL);
+
+    scr_back_btn_create(parent, existing ? "Edit event" : "New event", scr19_1_back_event);
+}
+
+static void entry19_1(void)
+{
+    lv_group_focus_obj(scr19_1_title_ta);
+    ui_disp_full_refr();
+}
+
+static void exit19_1(void) { ui_disp_full_refr(); }
+
+static void destroy19_1(void)
+{
+    scr19_1_title_ta = scr19_1_date_ta = scr19_1_time_ta = scr19_1_notes_ta = NULL;
+    scr19_1_allday_val = scr19_1_repeat_val = scr19_1_remind_val = NULL;
+}
+
+static scr_lifecycle_t screen19_1 = {
+    .create = create19_1,
+    .entry = entry19_1,
+    .exit  = exit19_1,
+    .destroy = destroy19_1,
+};
+#endif
+
 //************************************[ UI ENTRY ]******************************************
 static lv_obj_t *menu_keypad;
 static lv_timer_t *menu_timer = NULL;
@@ -6086,6 +6611,27 @@ static void phone_event_timer_cb(lv_timer_t *t)
 {
     LV_UNUSED(t);
 
+    /* Calendar reminders. The store keeps track of what has already been
+     * given, so asking every half minute is enough and asking twice is safe. */
+    static uint32_t cal_last = 0;
+    if(millis() - cal_last > 30000) {
+        cal_last = millis();
+
+        uint32_t at = 0;
+        const cal_event_t *ev = calendar_reminder_due(&at);
+        if(ev) {
+            time_t     t_at = at;
+            struct tm *lt   = localtime(&t_at);
+            char body[CAL_TITLE_LEN + 32];
+            if(ev->all_day) snprintf(body, sizeof(body), "%s\n\nToday", ev->title);
+            else            snprintf(body, sizeof(body), "%s\n\n%02d:%02d", ev->title, lt->tm_hour, lt->tm_min);
+
+            Serial.printf("[CAL] reminder: %s\n", ev->title);
+            ui_phone_vibrate(500);
+            ui_notice("Reminder", body);
+        }
+    }
+
     uint32_t revision_before  = ui_sms_revision;
     bool     touched_open_thread = false;
 
@@ -6218,6 +6764,8 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN17_1_ID, &screen17_1);  //  - one file
     scr_mgr_register(SCREEN18_ID,   &screen18);    // calculator
     scr_mgr_register(SCREEN18_1_ID, &screen18_1);  //  - the RPN program listed
+    scr_mgr_register(SCREEN19_ID,   &screen19);    // calendar
+    scr_mgr_register(SCREEN19_1_ID, &screen19_1);  //  - one event
     
 
     scr_mgr_switch(SCREEN0_ID, false); // set root screen

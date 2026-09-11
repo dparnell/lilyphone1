@@ -56,6 +56,8 @@ enum {
     SCREEN17_1_ID, // the start of one file
     SCREEN18_ID,   // calculator
     SCREEN18_1_ID, // the RPN program, listed
+    SCREEN19_ID,   // calendar, a month at a time
+    SCREEN19_1_ID, // one event, edited
 };
 
 /* Why the contacts list was opened. When it is a pick the list hands a number

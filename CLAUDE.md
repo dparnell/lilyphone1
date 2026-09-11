@@ -313,6 +313,48 @@ The program is saved to SPIFFS (`/calc.prg`, one step per line) when recording
 stops and when it is cleared or backstepped; mode, angle unit, base and width go
 to NVS under `calc`. Registers and the stack are not saved.
 
+### Calendar
+
+`src/apps/calendar_store.cpp` is the model, built like the phone store: a
+PSRAM table mirrored to `/events.tsv`, rewritten whole on every change, LVGL
+task only. **A repeating event is one record.** `calendar_occurs_on()` answers
+"is it on this day" from the repeat rule, so there is no expansion into copies
+and editing the record changes every occurrence. Times are local wall-clock
+fields, not epochs, and `mktime()` is correct here - unlike in the clock code -
+because these fields are exactly the local time it takes; a reminder is
+compared against `time(NULL)` after that conversion.
+
+**Reminders fire from `phone_event_timer_cb`**, every 30 seconds, through
+`calendar_reminder_due()`. The store owns "already given": each event carries
+`fired`, the local epoch of the occurrence last reminded, saved to the file, so
+a reminder is given once per occurrence including across a restart. The check
+looks at today, tomorrow and the day after, which covers a day's notice on an
+event just after midnight, and accepts a three-minute window so a late tick
+still catches it. Nothing is due while `system_clock_is_set()` is false.
+`calendar_update()` keeps `fired` from the old record: an edited title does not
+re-fire a reminder already given, and a changed time is a new occurrence with a
+different epoch anyway.
+
+The month view (screen 19) is one `lv_btnmatrix` of 42 cells. **A matrix has no
+per-button styles**, so today's box, the selected day's inversion and the mark
+on a busy day are drawn in `LV_EVENT_DRAW_PART_BEGIN` / `_END` by cell id, and
+cells outside the month are `LV_BTNMATRIX_CTRL_HIDDEN` rather than absent so
+the grid stays seven wide. The map is rebuilt for each month from a static
+table of the strings "1".."31", since `lv_btnmatrix_set_map` keeps the pointers.
+Before the clock is set the view opens on the firmware's build date rather than
+January 1970.
+
+The editor (screen 19.1) is textareas for title, date, time and notes and three
+cycling rows, in a page that scrolls above the Save/Delete bar. Date and time
+are typed as `YYYY-MM-DD` and `HH:MM` and checked on save; a wrong one is
+refused with a notice rather than silently corrected. The hand-off is
+`ui_active_event` (an id, 0 for new) plus the selected day for the default
+date, in the same style as `ui_active_contact`.
+
+`tools/gen_menu_icons.py` draws the calendar and calculator icons in the
+vendor's 50x50 `LV_IMG_CF_TRUE_COLOR_ALPHA` layout; the generated files must
+not be hand-edited.
+
 ### Storage browser and export
 
 `src/apps/store_export.cpp` is the only thing in the firmware that writes to the SD card; everything else the phone keeps lives in SPIFFS. Both filesystems are `fs::FS`, which is what lets screen 17 walk either through one pointer - but they differ in one way that matters: **SPIFFS `File::name()` returns a full path where SD returns a bare name**, so the browser takes whatever follows the last slash and treats both alike.
