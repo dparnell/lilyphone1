@@ -2452,7 +2452,7 @@ static void setting_page_switch_cb(lv_event_t *e)
     }
 
     setting_item_create(setting_curr_page);
-    lv_label_set_text_fmt(setting_page, "%d / %d", setting_curr_page, setting_page_num);
+    lv_label_set_text_fmt(setting_page, "%d / %d", setting_curr_page + 1, setting_page_num + 1);
 }
 
 static void setting_item_create(int curr_apge)
@@ -2520,7 +2520,10 @@ static void create2(lv_obj_t *parent)
     lv_obj_set_style_shadow_width(setting_list, 0, LV_PART_MAIN);
 
     setting_num = sizeof(setting_handle_list) / sizeof(setting_handle_list[0]);
-    setting_page_num = setting_num / SETTING_PAGE_MAX_ITEM;
+    /* The index of the last page, which the wrap-around below compares against.
+     * Rounded up from the count, or a list that fills its pages exactly would
+     * get an empty one after them. */
+    setting_page_num = (setting_num - 1) / SETTING_PAGE_MAX_ITEM;
 
     setting_item_create(setting_curr_page);
 
@@ -2583,7 +2586,8 @@ static void create2(lv_obj_t *parent)
     lv_obj_set_width(setting_page, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(setting_page, LV_SIZE_CONTENT);    /// 1
     lv_obj_align(setting_page, LV_ALIGN_BOTTOM_MID, 0, -23);
-    lv_label_set_text_fmt(setting_page, "%d / %d", setting_curr_page, setting_page_num);
+    // Pages are indexed from zero and counted from one, as people count them.
+    lv_label_set_text_fmt(setting_page, "%d / %d", setting_curr_page + 1, setting_page_num + 1);
     lv_obj_set_style_text_color(setting_page, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(setting_page, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
