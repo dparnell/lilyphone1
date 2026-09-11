@@ -343,10 +343,12 @@ they only ever exist in memory.
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 
-Also inherited from the vendor firmware, and left working: a GPS readout and a
-WiFi access-point configuration screen. The vendor's battery-detail pages and
-peripheral self test were removed - the status bar and the boot screen already
-say what they said, and the rest was register dumps.
+Also inherited from the vendor firmware, and left working: a GPS readout. The
+vendor's other bring-up screens were removed - the battery-detail pages and
+peripheral self test, whose one useful figure is on the status bar and whose
+verdicts the boot screen now gives as they happen, and a WiFi scan-and-configure
+app that did nothing this phone needed: the ESP32's own WiFi serves the mesh
+companion link and the hotspot, and both are set up from their own screens.
 
 ## Building
 

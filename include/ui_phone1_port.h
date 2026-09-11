@@ -133,9 +133,6 @@ void ui_gps_get_time(uint8_t *hour, uint8_t *minute, uint8_t *second);
 void ui_gps_get_satellites(uint32_t *vsat);
 void ui_gps_get_speed(double *speed);
 
-// [ screen 4 ] --- Wifi Scan
-void ui_wifi_get_scan_info(ui_wifi_scan_info_t *list, int list_len);
-
 // [ screen 5 ] --- State
 bool ui_test_sd_card(void);
 bool ui_test_a7682e(void);

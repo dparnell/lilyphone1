@@ -267,28 +267,6 @@ void ui_gps_get_speed(double *speed)
 {
     gps_get_speed(speed);
 }
-//************************************[ screen 4 ]****************************************** Wifi Scan
-int is_chinese_utf8(const char *str) {
-    unsigned char c = (unsigned char)str[0];
-    return (c >= 0xE0 && c <= 0xEF);  // 检查第一个字节是否在 UTF-8 的中文字符范围内
-}
-
-void ui_wifi_get_scan_info(ui_wifi_scan_info_t *list, int list_len)
-{
-    int n = WiFi.scanNetworks();
-    if(n > list_len)
-        n = list_len;
-    
-    memset(list, 0, (sizeof(*list) * list_len));
-    for(int i = 0; i < n; i++)
-    {
-        const char *str = WiFi.SSID(i).c_str();
-        if(is_chinese_utf8(str))
-            continue;
-        strncpy(list[i].name, WiFi.SSID(i).c_str(), 16);
-        list[i].rssi = WiFi.RSSI(i);
-    }
-}
 // What is still up, for the screens that need to know
 bool ui_test_sd_card(void) 
 {

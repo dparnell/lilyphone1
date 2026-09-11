@@ -127,7 +127,7 @@ A pushed screen's widgets are destroyed on pop, so a screen cannot return a valu
 
 ### Modem ownership (important)
 
-`src/peripherals/peri_modem.cpp` owns `SerialAT` exclusively, on its own FreeRTOS task. **Nothing else may read or write `SerialAT`** — an earlier passthrough task did, and it swallowed the `RING` and `+CMTI` notifications that make the device answerable. Route raw AT traffic through `modem_request_at()` (the Wifi AP screens do this).
+`src/peripherals/peri_modem.cpp` owns `SerialAT` exclusively, on its own FreeRTOS task. **Nothing else may read or write `SerialAT`** — an earlier passthrough task did, and it swallowed the `RING` and `+CMTI` notifications that make the device answerable. Route raw AT traffic through `modem_request_at()` (the modem LED settings do this).
 
 The UI never blocks on the modem. Requests go down a queue, received messages come back up a second queue, and call/network state is a mutex-protected snapshot the UI polls. Two consequences to preserve when editing:
 

@@ -20,7 +20,6 @@ extern "C" {
 // How far down the screen a swipe may start and still count as pulling the
 // quick settings out of the top edge.
 #define UI_SHADE_PULL_ZONE      60
-#define UI_WIFI_SCAN_ITEM_MAX   13
 
 /*********************************************************************************
  *                                  TYPEDEFS
@@ -41,9 +40,6 @@ enum {
     SCREEN2_1_1_ID,// time zone picker
     SCREEN2_2_ID,  // settings
     SCREEN3_ID,    // gps
-    SCREEN4_ID,    // wifi
-    SCREEN4_1_ID,  // wifi settings
-    SCREEN4_2_ID,  // wifi scan
     SCREEN8_ID,   // dial screen
     SCREEN8_1_ID, // in-call screen
     SCREEN9_ID,   // shutdown
@@ -126,18 +122,6 @@ typedef struct _ui_setting
     lv_obj_t *obj;
     lv_obj_t *st;
 } ui_setting_handle;
-
-typedef struct _ui_a7682 {
-    const char *name;
-    lv_obj_t *obj;
-    lv_obj_t *st;
-    bool (*cb)(const char *at_cmd);
-} ui_a7682_handle;
-
-typedef struct {
-    char name[16];
-    int rssi;
-}ui_wifi_scan_info_t;
 
 /*********************************************************************************
  *                              GLOBAL PROTOTYPES
