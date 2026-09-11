@@ -44,10 +44,17 @@ deleted.
   refer to, the way a modern phone shows them, instead of appearing as a
   sentence quoting it. You can send the same six back.
 
-**Lock screen.** Swipe down from the top of the home screen for quick settings
-and a lock button, or let it lock itself after a configurable idle period. The
-lock screen shows the time, the date, the battery and who has messaged you.
-Swipe up to unlock. A call still comes through.
+**Lock screen.** Swipe down from the top of the home screen for quick settings,
+a lock button and a shut down button, or let it lock itself after a
+configurable idle period. The lock screen shows the time, the date, the battery
+and who has messaged you. Swipe up to unlock. A call still comes through.
+
+**Shutting down** asks first, since it is a swipe and a tap from anywhere. The
+charger cannot cut the power while a USB cable is supplying it, so with one
+plugged in the phone says so rather than pretending. The vendor's Sleep and
+Shutdown apps are gone from the home screen: sleep put the phone into a deep
+sleep it could only leave by the boot button, which on a phone is a power cut
+with extra steps.
 
 **Clock.** Set from the cellular network (NITZ) or from a GPS fix, whichever
 arrives first, with the local time zone taken from the network or chosen by hand

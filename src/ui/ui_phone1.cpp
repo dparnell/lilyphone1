@@ -431,9 +431,6 @@ static struct menu_btn menu_btn_list[] =
     {SCREEN1_ID,  &img_lora,    NULL,                "Mesh",     167,    101, UI_POWER_LORA},
     {SCREEN16_ID, NULL,         LV_SYMBOL_WIFI,      "Hotspot",  23,     189, UI_POWER_MODEM},
     {SCREEN18_ID, NULL,         LV_SYMBOL_KEYBOARD,  "Calc",     95,     189},
-    {SCREEN11_ID, &img_PCM5102, NULL,                "Sleep",    167,    189},
-
-    {SCREEN9_ID,  NULL,         LV_SYMBOL_POWER,     "Shutdown", 23,     13},  // Page two
 };
 
 static void menu_btn_event_cb(lv_event_t *e)
@@ -4704,153 +4701,6 @@ static scr_lifecycle_t screen17_1 = {
 };
 #endif
 
-//************************************[ screen 9 ]****************************************** Shutdown
-#if 1
-static lv_timer_t *shutdown_timer = NULL;
-
-static void scr9_btn_event_cb(lv_event_t * e)
-{
-    if(e->code == LV_EVENT_CLICKED){
-        scr_mgr_pop(false);
-    }
-}
-
-static void shutdown_timer_event(lv_timer_t* t)
-{
-    ui_shutdown_on();
-    lv_timer_del(t);
-}
-
-static void create9(lv_obj_t *parent)
-{
-    if(ui_battery_25896_is_vbus_in()) 
-    {
-        lv_obj_t * label = lv_label_create(parent);
-        lv_obj_set_width(label, lv_pct(95));
-        lv_obj_set_style_text_font(label, FONT_BOLD_SIZE_15, LV_PART_MAIN);
-        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-        lv_label_set_text(label, "The shutdown function can only be used when the "
-                            "battery is connected alone, and cannot be shut down when connected to USB.");
-        lv_obj_center(label);
-
-        // back 
-        scr_back_btn_create(parent, "Shoutdown", scr8_btn_event_cb);
-    } 
-    else 
-    {
-        lv_obj_t * img = lv_img_create(parent);
-        lv_img_set_src(img, &img_start);
-        lv_obj_center(img);
-
-        lv_timer_create(shutdown_timer_event, 2000, (void *)parent);
-    }
-}
-static void entry9(void) 
-{
-    ui_disp_full_refr();
-}
-static void exit9(void) {
-    ui_disp_full_refr();
-}
-static void destroy9(void) { }
-
-static scr_lifecycle_t screen9 = {
-    .create = create9,
-    .entry = entry9,
-    .exit  = exit9,
-    .destroy = destroy9,
-};
-#endif
-//************************************[ screen 10 ]***************************************** pcm5102
-
-//************************************[ screen 11 ]****************************************** Sleep
-#if 1
-#include <TouchDrvCSTXXX.hpp>
-static void scr11_btn_event_cb(lv_event_t * e)
-{
-    if(e->code == LV_EVENT_CLICKED){
-        scr_mgr_pop(false);
-    }
-}
-
-static void create11(lv_obj_t *parent)
-{
-    extern TouchDrvCSTXXX touch;
-
-    touch.sleep();
-
-
-    SerialGPS.end();
-    
-    // pinMode(BOARD_GPS_PPS, OUTPUT);
-    // pinMode(BOARD_GPS_RXD, OUTPUT);
-    // pinMode(BOARD_GPS_TXD, OUTPUT);
-    // pinMode(BOARD_LORA_RST, OUTPUT);
-    // pinMode(BOARD_TOUCH_RST, OUTPUT);
-    // pinMode(BOARD_LORA_BUSY, OUTPUT);
-
-    // digitalWrite(BOARD_GPS_PPS, LOW);
-    // digitalWrite(BOARD_GPS_RXD, LOW);
-    // digitalWrite(BOARD_GPS_TXD, LOW);
-    // digitalWrite(BOARD_LORA_RST, LOW);
-    // digitalWrite(BOARD_TOUCH_RST, LOW);
-    // digitalWrite(BOARD_LORA_BUSY, LOW);
-
-    gpio_reset_pin((gpio_num_t)BOARD_GPS_PPS);
-    gpio_reset_pin((gpio_num_t)BOARD_GPS_RXD);
-    gpio_reset_pin((gpio_num_t)BOARD_GPS_TXD);
-    gpio_reset_pin((gpio_num_t)BOARD_LORA_RST);
-    gpio_reset_pin((gpio_num_t)BOARD_TOUCH_RST);
-    gpio_reset_pin((gpio_num_t)BOARD_LORA_BUSY);
-
-    digitalWrite(BOARD_6609_EN, LOW);
-    digitalWrite(BOARD_LORA_EN, LOW);
-    digitalWrite(BOARD_GPS_EN, LOW);
-    
-    digitalWrite(BOARD_1V8_EN, LOW);
-    digitalWrite(BOARD_A7682E_PWRKEY, LOW);
-
-    // gpio_hold_en((gpio_num_t)BOARD_GPS_PPS);
-    // gpio_hold_en((gpio_num_t)BOARD_TOUCH_RST);
-    // gpio_hold_en((gpio_num_t)BOARD_GPS_RXD);
-    // gpio_hold_en((gpio_num_t)BOARD_GPS_TXD);
-    // gpio_hold_en((gpio_num_t)BOARD_LORA_RST);
-    // gpio_hold_en((gpio_num_t)BOARD_LORA_BUSY);
-    gpio_hold_en((gpio_num_t)BOARD_6609_EN);
-    gpio_hold_en((gpio_num_t)BOARD_LORA_EN);
-    gpio_hold_en((gpio_num_t)BOARD_GPS_EN);
-    gpio_hold_en((gpio_num_t)BOARD_1V8_EN);
-    gpio_hold_en((gpio_num_t)BOARD_A7682E_PWRKEY);
-    gpio_deep_sleep_hold_en();
-
-    
-    // The panel is normally parked a few seconds after the last update, which
-    // never arrives once the CPU is asleep, so park it here.
-    ui_disp_hibernate();
-
-    // esp_sleep_enable_ext0_wakeup((gpio_num_t)ENCODER_KEY, 0);                            
-    esp_sleep_enable_ext1_wakeup((1UL << BOARD_BOOT_PIN), ESP_EXT1_WAKEUP_ANY_LOW);   // Hibernate using user keys
-    esp_deep_sleep_start();
-
-    // back 
-    scr_back_btn_create(parent, "Sleep", scr8_btn_event_cb);
-}
-static void entry11(void) 
-{
-    ui_disp_full_refr();
-}
-static void exit11(void) {
-    ui_disp_full_refr();
-}
-static void destroy11(void) { }
-
-static scr_lifecycle_t screen11 = {
-    .create = create11,
-    .entry = entry11,
-    .exit  = exit11,
-    .destroy = destroy11,
-};
-#endif
 //************************************[ screen 14 ]***************************************** quick settings
 #if 1
 /* Pulled down from the top of the menu. The settings here are the ones worth
@@ -4932,6 +4782,44 @@ static void scr14_toggle_event(lv_event_t *e)
     ui_disp_full_refr();
 }
 
+/* Powering off is a swipe and two taps away, so the second tap is a
+ * confirmation. The charger will not cut the power while USB is plugged in -
+ * it has a supply to run from - so that case is explained instead of silently
+ * doing nothing. */
+static void scr14_shutdown_do(void)
+{
+    if(ui_battery_25896_is_vbus_in()) {
+        ui_notice("Shut down", "Unplug the USB cable first.\n\nThe phone cannot switch "
+                               "itself off while it is being powered from it.");
+        return;
+    }
+
+    /* A last word on the panel, painted now: e-paper keeps whatever it was
+     * last shown, so without this the phone would sit dark displaying a
+     * settings screen. Then the panel is parked before the power goes, since
+     * the timer that normally parks it will never get to run. */
+    lv_obj_t *note = lv_label_create(lv_layer_top());
+    lv_obj_set_size(note, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_bg_color(note, DECKPRO_COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(note, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_text_color(note, DECKPRO_COLOR_FG, LV_PART_MAIN);
+    lv_obj_set_style_text_font(note, FONT_BOLD_SIZE_16, LV_PART_MAIN);
+    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(note, LV_VER_RES / 2 - 10, LV_PART_MAIN);
+    lv_label_set_text(note, "Powered off");
+    ui_disp_full_refr();
+    lv_refr_now(NULL);
+
+    ui_disp_hibernate();
+    ui_shutdown_on();
+}
+
+static void scr14_shutdown_event(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    ui_confirm("Shut down", "Switch the phone off?", "Shut down", scr14_shutdown_do);
+}
+
 static void scr14_lock_event(lv_event_t *e)
 {
     LV_UNUSED(e);
@@ -4945,7 +4833,8 @@ static void scr14_lock_event(lv_event_t *e)
 static void create14(lv_obj_t *parent)
 {
     lv_obj_t *bar = scr_action_bar_create(parent, 44);
-    scr_bar_btn_create(bar, LV_SYMBOL_POWER "  Lock screen", 190, scr14_lock_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_EYE_CLOSE "  Lock", 106, scr14_lock_event, NULL);
+    scr_bar_btn_create(bar, LV_SYMBOL_POWER "  Shut down", 106, scr14_shutdown_event, NULL);
 
     scr14_list = lv_list_create(parent);
     scr_scroll_for_epaper(scr14_list);
@@ -6315,8 +6204,6 @@ void ui_phone1_entry(void)
     scr_mgr_register(SCREEN3_ID,    &screen3);      // 
     scr_mgr_register(SCREEN8_ID,    &screen8);      // Phone - dialer
     scr_mgr_register(SCREEN8_1_ID,  &screen8_1);    //  - in call
-    scr_mgr_register(SCREEN9_ID,    &screen9);      // Shutdown
-    scr_mgr_register(SCREEN11_ID,   &screen11);
     scr_mgr_register(SCREEN12_ID,   &screen12);     // Contacts
     scr_mgr_register(SCREEN12_1_ID, &screen12_1);   //  - details
     scr_mgr_register(SCREEN12_2_ID, &screen12_2);   //  - editor

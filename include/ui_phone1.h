@@ -42,8 +42,6 @@ enum {
     SCREEN3_ID,    // gps
     SCREEN8_ID,   // dial screen
     SCREEN8_1_ID, // in-call screen
-    SCREEN9_ID,   // shutdown
-    SCREEN11_ID,  // sleep
     SCREEN12_ID,   // contacts
     SCREEN12_1_ID, // contact details
     SCREEN12_2_ID, // contact editor
