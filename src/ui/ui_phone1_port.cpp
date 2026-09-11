@@ -289,11 +289,7 @@ void ui_wifi_get_scan_info(ui_wifi_scan_info_t *list, int list_len)
         list[i].rssi = WiFi.RSSI(i);
     }
 }
-//************************************[ screen 5 ]****************************************** Test
-bool ui_test_get(int peri_id)
-{
-    return peri_init_st[peri_id];
-}
+// What is still up, for the screens that need to know
 bool ui_test_sd_card(void) 
 {
     return peri_init_st[E_PERI_SD];

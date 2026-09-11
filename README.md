@@ -343,8 +343,10 @@ they only ever exist in memory.
 **Notifications.** Vibrate on an incoming call, on an incoming text, or neither;
 optionally a tone as well. All configurable and remembered across reboots.
 
-Also inherited from the vendor firmware, and left working: a GPS readout, a WiFi access-point configuration screen, battery and
-charger detail, and a peripheral self test.
+Also inherited from the vendor firmware, and left working: a GPS readout and a
+WiFi access-point configuration screen. The vendor's battery-detail pages and
+peripheral self test were removed - the status bar and the boot screen already
+say what they said, and the rest was register dumps.
 
 ## Building
 

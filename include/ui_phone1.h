@@ -44,10 +44,6 @@ enum {
     SCREEN4_ID,    // wifi
     SCREEN4_1_ID,  // wifi settings
     SCREEN4_2_ID,  // wifi scan
-    SCREEN5_ID,    // test
-    SCREEN6_ID,    // battery
-    SCREEN6_1_ID,
-    SCREEN6_2_ID,
     SCREEN8_ID,   // dial screen
     SCREEN8_1_ID, // in-call screen
     SCREEN9_ID,   // shutdown
@@ -130,14 +126,6 @@ typedef struct _ui_setting
     lv_obj_t *obj;
     lv_obj_t *st;
 } ui_setting_handle;
-
-typedef struct _ui_test {
-    const char *name;
-    int peri_id;
-    lv_obj_t *obj;
-    lv_obj_t *st;
-    bool (*cb)(int);
-} ui_test_handle;
 
 typedef struct _ui_a7682 {
     const char *name;

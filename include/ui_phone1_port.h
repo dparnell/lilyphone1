@@ -137,7 +137,6 @@ void ui_gps_get_speed(double *speed);
 void ui_wifi_get_scan_info(ui_wifi_scan_info_t *list, int list_len);
 
 // [ screen 5 ] --- State
-bool ui_test_get(int peri_id);
 bool ui_test_sd_card(void);
 bool ui_test_a7682e(void);
 bool ui_test_pcm5102(void);
