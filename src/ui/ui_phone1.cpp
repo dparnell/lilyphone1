@@ -4899,7 +4899,7 @@ static void scr15_render(void)
     if(scr15_clock == NULL) return;
 
     char when[48] = "--:--";
-    char detail[160];
+    char detail[224];
 
     if(system_clock_is_set()) {
         time_t    now = time(NULL);
@@ -4915,6 +4915,28 @@ static void scr15_render(void)
         struct tm tm_now;
         localtime_r(&now, &tm_now);
         strftime(date, sizeof(date), "%a %d %b", &tm_now);
+    }
+
+    /* The next appointment within the week, named as a day only when it is
+     * not today: "Today" is what a locked phone on a desk is mostly asked. */
+    char next[CAL_TITLE_LEN + 32] = "";
+    uint32_t at = 0;
+    const cal_event_t *ev = calendar_next_upcoming(&at);
+    if(ev) {
+        time_t    t_at = at, t_now = time(NULL);
+        struct tm tm_at, tm_now;
+        localtime_r(&t_at, &tm_at);
+        localtime_r(&t_now, &tm_now);
+
+        char day[12];
+        int  days_on = tm_at.tm_yday - tm_now.tm_yday + (tm_at.tm_year - tm_now.tm_year) * 365;
+        if(days_on == 0)      snprintf(day, sizeof(day), "Today");
+        else if(days_on == 1) snprintf(day, sizeof(day), "Tomorrow");
+        else                  strftime(day, sizeof(day), "%a", &tm_at);
+
+        if(ev->all_day) lv_snprintf(next, sizeof(next), "\n\n%s %s\n%s", LV_SYMBOL_BELL, day, ev->title);
+        else            lv_snprintf(next, sizeof(next), "\n\n%s %s %02d:%02d\n%s", LV_SYMBOL_BELL, day,
+                                    tm_at.tm_hour, tm_at.tm_min, ev->title);
     }
 
     /* What is waiting, from either radio. A count on its own says something is
@@ -4952,8 +4974,8 @@ static void scr15_render(void)
         }
     }
 
-    lv_snprintf(detail, sizeof(detail), "%s%s\n\n%s %d%%",
-                date, pending,
+    lv_snprintf(detail, sizeof(detail), "%s%s%s\n\n%s %d%%",
+                date, next, pending,
                 ui_battert_27220_get_percent_level(), ui_battery_27220_get_percent());
 
     lv_label_set_text(scr15_detail, detail);
@@ -4965,8 +4987,9 @@ static void scr15_timer_event(lv_timer_t *t)
 {
     LV_UNUSED(t);
 
-    static int shown_minute = -1;
-    static int shown_unread = -1;
+    static int      shown_minute = -1;
+    static int      shown_unread = -1;
+    static uint32_t shown_event  = 0;
 
     time_t    now = time(NULL);
     struct tm tm_now;
@@ -4976,10 +4999,18 @@ static void scr15_timer_event(lv_timer_t *t)
      * message arriving does, so it counts as a change worth repainting for. */
     int unread = sms_unread_total() + mesh_net_unread_total()
                + (mesh_companion_is_connected() ? 100000 : 0);
-    if(tm_now.tm_min == shown_minute && unread == shown_unread) return;
+
+    // An appointment starting, or being added from the reminder that just
+    // fired, changes the next one to show.
+    uint32_t at = 0;
+    const cal_event_t *ev = calendar_next_upcoming(&at);
+    uint32_t event = ev ? ev->id ^ at : 0;
+
+    if(tm_now.tm_min == shown_minute && unread == shown_unread && event == shown_event) return;
 
     shown_minute = tm_now.tm_min;
     shown_unread = unread;
+    shown_event  = event;
 
     scr15_render();
     ui_disp_full_refr();

@@ -46,8 +46,8 @@ deleted.
 
 **Lock screen.** Swipe down from the top of the home screen for quick settings,
 a lock button and a shut down button, or let it lock itself after a
-configurable idle period. The lock screen shows the time, the date, the battery
-and who has messaged you. Swipe up to unlock. A call still comes through.
+configurable idle period. The lock screen shows the time, the date, the battery,
+who has messaged you and the next appointment in the coming week. Swipe up to unlock. A call still comes through.
 
 **Shutting down** asks first, since it is a swipe and a tap from anywhere. The
 charger cannot cut the power while a USB cable is supplying it, so with one
